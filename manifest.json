@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.lgse.flea-dropbox",
+  "name": "Dropbox – sincronizzazione selettiva",
+  "version": "0.1.0",
+  "author": "lorenzo nizzi grifi gargiolli",
+  "license": "MIT",
+  "description": "Escludi cartelle dalla sincronizzazione Dropbox, gestisci le esclusioni, copia i link condivisi e apri su dropbox.com.",
+  "kinds": ["menu-action"],
+  "menuActions": [
+    {
+      "id": "exclude",
+      "label": "Escludi dalla sincronizzazione",
+      "glyph": "eye-off",
+      "menus": ["file"],
+      "when": {"minItems": 1, "maxItems": 512, "folders": true}
+    },
+    {
+      "id": "manage",
+      "label": "Gestisci cartelle escluse…",
+      "glyph": "folder",
+      "menus": ["file", "background"],
+      "when": {"minItems": 0, "maxItems": 1, "folders": true}
+    },
+    {
+      "id": "sharelink",
+      "label": "Copia link Dropbox",
+      "glyph": "copy",
+      "menus": ["file"],
+      "when": {"minItems": 1, "maxItems": 10, "folders": true}
+    },
+    {
+      "id": "view",
+      "label": "Visualizza su dropbox.com",
+      "glyph": "globe",
+      "menus": ["file"],
+      "when": {"minItems": 1, "maxItems": 1, "folders": true}
+    }
+  ],
+  "access": ["selection", "folder", "notify", "network", "exec:dropbox-cli", "exec:wl-copy", "exec:qml6", "exec:systemd-run"],
+  "entryPoints": {"run": "bin/run"}
+}
