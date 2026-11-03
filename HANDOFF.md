@@ -2,7 +2,7 @@
 
 ## Stato
 
-Versione 0.1.0 (non ancora installata in Flea, non rilasciata).
+Versione 0.1.0 (installata e abilitata in Flea il 03/11/2026 da ~/Projects/flea-dropbox, non rilasciata).
 
 Porta il provider Strata Dropbox (`~/.config/strata/providers/dropbox`) al protocollo plugin di Flea,
 come azioni di menu (`menu-action`). Il provider Strata originale non è stato modificato.
@@ -18,14 +18,11 @@ come azioni di menu (`menu-action`). Il provider Strata originale non è stato m
 - `tests/test_protocol.py`: 13 test, tutti verdi (`python3 -m unittest discover -s tests -v`).
 - `flea plugin validate` senza output, uscita 0.
 
-## Da verificare dal vivo (pendente, a cura dell'utente)
+## Verifica dal vivo
 
-- Installazione in Flea: `flea plugin add` e `flea plugin enable`, da eseguire dall'utente.
-- Comparsa delle voci di menu su file e sfondo, e condizioni `when`.
-- "Gestisci cartelle escluse…": la finestra QML si apre con systemd-run e il tema Omarchy è corretto.
-- "Copia link Dropbox": link negli appunti tramite wl-copy.
-- "Visualizza su dropbox.com": apertura del browser tramite xdg-open.
-- Eventuale necessità di passare variabili di display a systemd-run (WAYLAND_DISPLAY) se la finestra non appare.
+- 03/11/2026: l'utente conferma che il plugin funziona in Flea.
+- Installazione: fatta (flea plugin add + enable). Dopo modifiche al codice: `flea plugin remove io.github.lgse.flea-dropbox`
+  e di nuovo add + enable (update vale solo per plugin da Git).
 
 ## Note
 
