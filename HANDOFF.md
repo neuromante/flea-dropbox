@@ -27,7 +27,7 @@ come azioni di menu (`menu-action`). Il provider Strata originale non è stato m
 
 ## Note
 
-- La lista `access` segue la specifica; xdg-open, notify-send e fc-match non sono dichiarati come `exec:`.
+- La lista `access` dichiara tutti i programmi eseguiti (dropbox-cli, wl-copy, qml6, systemd-run, xdg-open, notify-send, fc-match).
 - Nessuna icona di stato Dropbox in Flea.
 - Flea scarica i plugin con Git senza la configurazione globale (GIT_CONFIG_GLOBAL/NOSYSTEM): non usa le credenziali
   di `gh`, quindi un repository privato non si può installare da URL. Per questo il repository è pubblico.

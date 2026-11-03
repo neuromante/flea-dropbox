@@ -37,6 +37,6 @@
       "when": {"minItems": 1, "maxItems": 1, "folders": true}
     }
   ],
-  "access": ["selection", "folder", "notify", "network", "exec:dropbox-cli", "exec:wl-copy", "exec:qml6", "exec:systemd-run"],
+  "access": ["selection", "folder", "notify", "network", "exec:dropbox-cli", "exec:wl-copy", "exec:qml6", "exec:systemd-run", "exec:xdg-open", "exec:notify-send", "exec:fc-match"],
   "entryPoints": {"run": "bin/run"}
 }
