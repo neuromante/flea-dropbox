@@ -19,7 +19,7 @@ La cartella Dropbox viene letta da `~/.dropbox/info.json`.
 
 ## Installazione
 
-Da GitHub (repository privato: Git usa le tue credenziali GitHub):
+Da GitHub:
 
 ```sh
 flea plugin add https://github.com/neuromante/flea-dropbox.git

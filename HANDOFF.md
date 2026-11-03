@@ -22,10 +22,12 @@ come azioni di menu (`menu-action`). Il provider Strata originale non è stato m
 
 - 03/11/2026: l'utente conferma che il plugin funziona in Flea.
 - Id rinominato in `io.github.neuromante.flea-dropbox` (account GitHub neuromante).
-- Repository privato: https://github.com/neuromante/flea-dropbox. Installazione in Flea da Git
+- Repository pubblico: https://github.com/neuromante/flea-dropbox (licenza MIT). Installazione in Flea da Git
   (`flea plugin add <url>`); per aggiornare: push, poi `flea plugin update io.github.neuromante.flea-dropbox`.
 
 ## Note
 
 - La lista `access` segue la specifica; xdg-open, notify-send e fc-match non sono dichiarati come `exec:`.
 - Nessuna icona di stato Dropbox in Flea.
+- Flea scarica i plugin con Git senza la configurazione globale (GIT_CONFIG_GLOBAL/NOSYSTEM): non usa le credenziali
+  di `gh`, quindi un repository privato non si può installare da URL. Per questo il repository è pubblico.
