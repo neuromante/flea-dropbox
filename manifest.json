@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "id": "io.github.lgse.flea-dropbox",
+  "id": "io.github.neuromante.flea-dropbox",
   "name": "Dropbox – sincronizzazione selettiva",
   "version": "0.1.0",
   "author": "lorenzo nizzi grifi gargiolli",

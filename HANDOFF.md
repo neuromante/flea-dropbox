@@ -9,7 +9,7 @@ come azioni di menu (`menu-action`). Il provider Strata originale non è stato m
 
 ## Fatto
 
-- `manifest.json`: id `io.github.lgse.flea-dropbox`, quattro azioni di menu (exclude, manage, sharelink, view).
+- `manifest.json`: id `io.github.neuromante.flea-dropbox`, quattro azioni di menu (exclude, manage, sharelink, view).
 - `bin/run`: protocollo JSON-lines (hello, settings, run, cancel, EOF); errori per richiesta senza uscita del processo.
   Modalità `--manage <cartella>` per la finestra di gestione delle esclusioni.
 - Finestre e browser avviati con `systemd-run --user --collect --quiet`, fuori dal gruppo di processi e dal limite
@@ -21,8 +21,9 @@ come azioni di menu (`menu-action`). Il provider Strata originale non è stato m
 ## Verifica dal vivo
 
 - 03/11/2026: l'utente conferma che il plugin funziona in Flea.
-- Installazione: fatta (flea plugin add + enable). Dopo modifiche al codice: `flea plugin remove io.github.lgse.flea-dropbox`
-  e di nuovo add + enable (update vale solo per plugin da Git).
+- Id rinominato in `io.github.neuromante.flea-dropbox` (account GitHub neuromante).
+- Repository privato: https://github.com/neuromante/flea-dropbox. Installazione in Flea da Git
+  (`flea plugin add <url>`); per aggiornare: push, poi `flea plugin update io.github.neuromante.flea-dropbox`.
 
 ## Note
 
