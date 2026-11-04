@@ -2,7 +2,7 @@
 
 ## Stato
 
-Versione 0.2.1 (04/11/2026). 0.2.0 collaudata dal vivo dall'utente dentro Dropbox. 0.2.1: "Visualizza su dropbox.com"
+Versione 0.2.1 (04/11/2026), collaudata dal vivo dall'utente (0.2.0 dentro Dropbox, 0.2.1 menu dello sfondo). 0.2.1: "Visualizza su dropbox.com"
 anche nel menu dello sfondo (cartella aperta, o home fuori da Dropbox); con più elementi selezionati resta nascosta.
 La 0.1.0 è quella installata e verificata in Flea dal 03/11/2026.
 
@@ -31,14 +31,10 @@ come azioni di menu (`menu-action`). Il provider Strata originale non è stato m
 - `view` fuori da Dropbox apre https://www.dropbox.com/home e risponde "Aperto su dropbox.com.".
 - Test: 26 test (protocollo + build_tree + plan_changes), tutti verdi.
 
-Da verificare dal vivo (non ancora fatto):
+Verificato dal vivo dall'utente il 04/11/2026: finestra ad albero su Dropbox reale e voci fuori da Dropbox
+(menu del file e dello sfondo). Plugin aggiornato in Flea con `flea plugin update`.
 
-- Finestra ad albero su Dropbox reale: espansione, spunta/togliere, ricerca, Applica (exclude add/remove e
-  notifica), Annulla, elenco troncato.
-- Voci di menu fuori da Dropbox: "Sincronizzazione selettiva" apre la finestra sulla radice; "Visualizza" apre
-  dropbox.com.
-- Dopo installazione: `flea plugin update` (o add da cartella) e verifica del launcher/stato in Flea.
-- `tests/test_protocol.py`: 13 test, tutti verdi (`python3 -m unittest discover -s tests -v`).
+- `tests/test_protocol.py`: 29 test, tutti verdi (`python3 -m unittest discover -s tests -v`).
 - `flea plugin validate` senza output, uscita 0.
 
 ## Verifica dal vivo
