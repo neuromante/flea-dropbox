@@ -11,7 +11,17 @@ import QtQuick.Window
 Window {
     id: win
 
-    readonly property var input: JSON.parse(Qt.application.arguments[Qt.application.arguments.length - 1])
+    readonly property var input: loadInput(Qt.application.arguments[Qt.application.arguments.length - 1])
+
+    // The last argument is the payload itself or, as bin/run passes it, the path of a JSON file
+    // (one argv string is capped at 128 KiB). Reading it needs QML_XHR_ALLOW_FILE_READ=1.
+    function loadInput(arg) {
+        if (arg.charAt(0) === "{") return JSON.parse(arg)
+        const xhr = new XMLHttpRequest()
+        xhr.open("GET", "file://" + arg, false)
+        xhr.send()
+        return JSON.parse(xhr.responseText)
+    }
     readonly property var pal: Object.assign({
         background: "#101620", dark_background: "#0c1118", lighter_background: "#282d36",
         foreground: "#c2cee9", muted: "#606369", accent: "#99aed6",

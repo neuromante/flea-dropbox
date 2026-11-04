@@ -292,6 +292,12 @@ class TreeTest(unittest.TestCase):
         full = run.build_tree(self.root, [], max_nodes=100)
         self.assertFalse(full["truncated"])
 
+    def test_truncation_keeps_every_top_level_folder(self):
+        # Breadth-first: the cap drops deep levels, never a later top-level folder.
+        tree = run.build_tree(self.root, [], max_nodes=4)
+        self.assertEqual(self.rels(tree), ["A", "alpha", "Beta", "Z"])
+        self.assertTrue(tree["truncated"])
+
     def test_excluded_nodes_survive_truncation(self):
         tree = run.build_tree(self.root, [self.path("Z")], max_nodes=0)
         self.assertTrue(tree["truncated"])

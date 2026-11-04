@@ -10,11 +10,13 @@ Test overrides (environment):
   FLEA_DROPBOX_INFO     Dropbox info.json (default ~/.dropbox/info.json)
   FLEA_DROPBOX_NO_SPAWN=1  do not launch GUI/browser/clipboard children
 """
+import collections
 import json
 import os
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 import tomllib
 from urllib.parse import quote
@@ -335,27 +337,28 @@ def build_tree(root, excluded, max_depth=TREE_MAX_DEPTH, max_nodes=TREE_MAX_NODE
     nodes = {}
     state = {"count": 0, "truncated": False}
 
-    def walk(abs_dir, rel_dir, depth):
+    # Breadth-first, so a node cap drops the deepest levels, never later top-level folders.
+    queue = collections.deque([(root, "", 0)])
+    while queue and not state["truncated"]:
+        abs_dir, rel_dir, depth = queue.popleft()
         try:
             with os.scandir(abs_dir) as it:
                 entries = [e for e in it
                            if not e.name.startswith(".") and e.is_dir(follow_symlinks=False)]
         except OSError:
-            return
+            continue
         entries.sort(key=lambda e: (e.name.casefold(), e.name))
         for entry in entries:
             if state["count"] >= max_nodes:
                 state["truncated"] = True
-                return
+                break
             state["count"] += 1
             rel = rel_dir + "/" + entry.name if rel_dir else entry.name
             is_excl = rel in excl
             nodes[rel] = {"rel": rel, "name": entry.name, "depth": depth,
                           "synced": not is_excl, "parent": rel_dir or None}
             if not is_excl and depth + 1 < max_depth:
-                walk(entry.path, rel, depth + 1)
-
-    walk(root, "", 0)
+                queue.append((entry.path, rel, depth + 1))
 
     for rel in sorted(excl, key=lambda r: (r.count("/"), r)):
         if rel in nodes:
@@ -421,10 +424,17 @@ def manage_dialog(target):
     payload = json.dumps({"root": root, "target": target_rel, "nodes": tree["nodes"],
                           "truncated": tree["truncated"], "colors": theme_colors(),
                           "font": ui_font()}, ensure_ascii=False)
-    env = dict(os.environ, QT_FORCE_STDERR_LOGGING="1", QT_QPA_PLATFORMTHEME="")
+    # The payload goes through a private file: one argv string is capped at 128 KiB.
+    env = dict(os.environ, QT_FORCE_STDERR_LOGGING="1", QT_QPA_PLATFORMTHEME="",
+               QML_XHR_ALLOW_FILE_READ="1")
+    tmpdir = os.environ.get("XDG_RUNTIME_DIR") or None
     try:
-        proc = subprocess.run([QML, PICKER, "--", payload], stdin=DEVNULL,
-                              stdout=DEVNULL, stderr=subprocess.PIPE, env=env, check=False)
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json",
+                                         prefix="flea-dropbox-", dir=tmpdir) as fh:
+            fh.write(payload)
+            fh.flush()
+            proc = subprocess.run([QML, PICKER, "--", fh.name], stdin=DEVNULL,
+                                  stdout=DEVNULL, stderr=subprocess.PIPE, env=env, check=False)
     except OSError as exc:
         notify("Dropbox", "Impossibile aprire la finestra: %s" % exc)
         return 1
