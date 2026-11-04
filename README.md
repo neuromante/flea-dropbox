@@ -14,6 +14,10 @@ A plugin for the [Flea](https://github.com/thisisgm/flea) file manager that adds
 The plugin is written in Python (standard library only) and uses `dropbox-cli` and the Dropbox client you already
 have installed. The Dropbox folder is read from `~/.dropbox/info.json`.
 
+This plugin is separate from `flea.dropbox`, the Dropbox plugin built into Flea. The built-in plugin adds a
+Dropbox place in the sidebar and a "send to Dropbox" target. This plugin adds the sync, link and dropbox.com
+actions. The two can be enabled together.
+
 Menu labels are in English, because Flea manifests are not localized. Runtime texts (replies, notifications and the
 selective-sync window) follow Flea's language: Italian when Flea uses Italian, English otherwise.
 
