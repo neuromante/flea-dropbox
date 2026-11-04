@@ -89,6 +89,8 @@ The tests start `bin/run` with a fake `dropbox-cli` and a temporary Dropbox fold
 
 Environment variables for the tests: `FLEA_DROPBOX_CLI`, `FLEA_DROPBOX_INFO`, `FLEA_DROPBOX_NO_SPAWN=1`.
 
+See [CHANGELOG.md](CHANGELOG.md) for the release history.
+
 ## License
 
 MIT. Author: lorenzo nizzi grifi gargiolli.
