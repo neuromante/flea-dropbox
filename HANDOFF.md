@@ -2,7 +2,8 @@
 
 ## Stato
 
-Versione 0.1.0 (installata e abilitata in Flea il 03/11/2026 da ~/Projects/flea-dropbox, non rilasciata).
+Versione 0.2.0 (in sviluppo in ~/Projects/flea-dropbox, non ancora installata né rilasciata).
+La 0.1.0 è quella installata e verificata in Flea dal 03/11/2026.
 
 Porta il provider Strata Dropbox (`~/.config/strata/providers/dropbox`) al protocollo plugin di Flea,
 come azioni di menu (`menu-action`). Il provider Strata originale non è stato modificato.
@@ -14,7 +15,28 @@ come azioni di menu (`menu-action`). Il provider Strata originale non è stato m
   Modalità `--manage <cartella>` per la finestra di gestione delle esclusioni.
 - Finestre e browser avviati con `systemd-run --user --collect --quiet`, fuori dal gruppo di processi e dal limite
   di memoria di Flea. Fallback: nuova sessione.
-- `picker.qml`: copia invariata dal provider Strata.
+- `picker.qml`: copia invariata dal provider Strata (0.1.0).
+
+## Versione 0.2.0
+
+- Azione `manage` diventata "Sincronizzazione selettiva Dropbox…" (glifo cloud-upload, stesso id per i key binding).
+  Apre sempre la finestra, anche senza cartelle escluse e anche fuori da Dropbox (cartella di partenza: il
+  percorso selezionato se è una cartella, altrimenti `folder`, altrimenti la radice).
+- Finestra `picker.qml` ad albero: spunta = sincronizzata, esclusa marcata, freccia per espandere, ricerca piatta,
+  Applica/Annulla. Le modifiche tornano come righe `DBXEXCL`/`DBXINCL` e `DBXDONE` su stderr di qml6.
+- `bin/run --manage <cartella>`: `build_tree` (max 4 livelli, 3000 nodi, cartelle nascoste saltate, esclusioni
+  sempre presenti) e `plan_changes` (solo le cartelle più alte, rel validati) sono funzioni pure; poi
+  `dropbox-cli exclude remove` / `add` con cwd "/" e notifica di riepilogo.
+- `view` fuori da Dropbox apre https://www.dropbox.com/home e risponde "Aperto su dropbox.com.".
+- Test: 26 test (protocollo + build_tree + plan_changes), tutti verdi.
+
+Da verificare dal vivo (non ancora fatto):
+
+- Finestra ad albero su Dropbox reale: espansione, spunta/togliere, ricerca, Applica (exclude add/remove e
+  notifica), Annulla, elenco troncato.
+- Voci di menu fuori da Dropbox: "Sincronizzazione selettiva" apre la finestra sulla radice; "Visualizza" apre
+  dropbox.com.
+- Dopo installazione: `flea plugin update` (o add da cartella) e verifica del launcher/stato in Flea.
 - `tests/test_protocol.py`: 13 test, tutti verdi (`python3 -m unittest discover -s tests -v`).
 - `flea plugin validate` senza output, uscita 0.
 

@@ -3,7 +3,7 @@
 
 Protocol: newline-delimited JSON on stdin/stdout. Stdout carries protocol
 replies only; every child process gets stdout/stderr/stdin redirected away
-from it. `--manage <folder>` runs the exclusion dialog (launched detached).
+from it. `--manage <target>` runs the selective-sync dialog (launched detached).
 
 Test overrides (environment):
   FLEA_DROPBOX_CLI      dropbox-cli binary (default /usr/bin/dropbox-cli)
@@ -22,6 +22,9 @@ from urllib.parse import quote
 PROTOCOL_VERSION = 1
 MAX_MESSAGE = 300
 SHARELINK_BUDGET = 25.0  # seconds for one sharelink request (Flea limit is 30 s)
+TREE_MAX_DEPTH = 4       # listed folder levels below the Dropbox root
+TREE_MAX_NODES = 3000    # walked folders listed in the dialog
+DROPBOX_HOME = "https://www.dropbox.com/home"
 
 DBX_CLI = os.environ.get("FLEA_DROPBOX_CLI") or "/usr/bin/dropbox-cli"
 INFO_PATH = os.environ.get("FLEA_DROPBOX_INFO") or os.path.join(
@@ -42,6 +45,8 @@ THEME_COLORS = os.path.join(os.path.expanduser("~"), ".local", "state", "omarchy
 
 OUTSIDE = "Il percorso non è nella cartella Dropbox."
 DEVNULL = subprocess.DEVNULL
+QML_EXCL = "qml: DBXEXCL "
+QML_INCL = "qml: DBXINCL "
 
 
 class Refusal(Exception):
@@ -95,6 +100,13 @@ def is_under_root(path, root):
         return True
     prefix = root if root.endswith("/") else root + "/"
     return path.startswith(prefix)
+
+
+def rel_of(path, root):
+    """Path relative to the root with "/" separators; "" for the root itself."""
+    if path == root:
+        return ""
+    return path[len(root.rstrip("/")) + 1:]
 
 
 def is_directory(path):
@@ -159,12 +171,6 @@ def excluded_dirs():
     return ["/" + ln for ln in out.splitlines()[1:] if ln.strip()]
 
 
-def excluded_under(folder, root):
-    """Excluded folders strictly below `folder` (lexical, component boundary)."""
-    prefix = folder.rstrip("/") + "/"
-    return sorted(e for e in excluded_dirs() if e.startswith(prefix) and is_under_root(e, root))
-
-
 def do_exclude(paths, root):
     dirs = [p for p in paths if p != root and is_directory(p)]
     if not dirs:
@@ -221,29 +227,27 @@ def do_view(paths, root):
     path = paths[0]
     rel = os.path.relpath(path, root)
     if rel == ".":
-        url = "https://www.dropbox.com/home"
+        url = DROPBOX_HOME
     elif is_directory(path):
-        url = "https://www.dropbox.com/home/" + quote(rel)
+        url = DROPBOX_HOME + "/" + quote(rel)
     else:
         parent, name = os.path.split(rel)
-        url = "https://www.dropbox.com/home/" + quote(parent) + "?preview=" + quote(name)
+        url = DROPBOX_HOME + "/" + quote(parent) + "?preview=" + quote(name)
     spawn_detached([XDG_OPEN, url])
     return "Aperto su dropbox.com: " + url
 
 
 def do_manage(req, paths, root):
-    """Validate the target and start the dialog detached; never wait for the user."""
-    if len(paths) == 1 and is_directory(paths[0]):
+    """Open the selective-sync dialog on the best target; never wait for the user."""
+    target = root
+    if paths and is_directory(paths[0]) and is_under_root(paths[0], root):
         target = paths[0]
     else:
         folder = req.get("folder")
-        if not isinstance(folder, str) or not folder.startswith("/"):
-            raise Refusal("Nessuna cartella di destinazione.")
-        target = os.path.normpath(folder)
-    if not is_under_root(target, root):
-        raise Refusal(OUTSIDE)
-    if not excluded_under(target, root):
-        raise Refusal("Nessuna cartella esclusa in questa posizione.")
+        if isinstance(folder, str) and folder.startswith("/"):
+            candidate = os.path.normpath(folder)
+            if is_under_root(candidate, root):
+                target = candidate
     spawn_detached([PYTHON, "-I", SELF, "--manage", target])
     return "Finestra aperta."
 
@@ -256,6 +260,9 @@ def handle_run(req):
     paths = valid_paths(req)
     if action == "manage":
         return {"op": "done", "message": clip(do_manage(req, paths, root))}
+    if action == "view" and len(paths) == 1 and not is_under_root(paths[0], root):
+        spawn_detached([XDG_OPEN, DROPBOX_HOME])
+        return {"op": "done", "message": "Aperto su dropbox.com."}
     if not paths:
         raise Refusal("Nessun elemento selezionato.")
     for p in paths:
@@ -285,7 +292,7 @@ def notify(title, body):
     if NO_SPAWN:
         return
     try:
-        subprocess.run([NOTIFY, "-a", "Dropbox", title, body], stdin=DEVNULL,
+        subprocess.run([NOTIFY, "-a", "Dropbox", title, clip(body, 200)], stdin=DEVNULL,
                        stdout=DEVNULL, stderr=DEVNULL, timeout=5, check=False)
     except (subprocess.TimeoutExpired, OSError):
         pass
@@ -310,24 +317,110 @@ def ui_font():
     return "monospace"
 
 
-def manage_dialog(folder):
-    """Dialog mode (`bin/run --manage <folder>`): pick excluded folders to sync again."""
+def build_tree(root, excluded, max_depth=TREE_MAX_DEPTH, max_nodes=TREE_MAX_NODES):
+    """Folder tree for the dialog: {"nodes": [...], "truncated": bool}.
+
+    Walks local directories under `root` (no symlink following, hidden names
+    skipped) down to `max_depth` levels, listing at most `max_nodes` of them.
+    Every excluded path under root is also a node (synced=False, no children):
+    if its parent is not listed it goes under the deepest listed ancestor.
+    Nodes come depth-first, siblings sorted case-insensitively.
+    """
+    root = os.path.normpath(root)
+    excl = set()
+    for path in excluded:
+        if isinstance(path, str) and path.startswith("/") and path != root \
+                and is_under_root(os.path.normpath(path), root):
+            excl.add(rel_of(os.path.normpath(path), root))
+    nodes = {}
+    state = {"count": 0, "truncated": False}
+
+    def walk(abs_dir, rel_dir, depth):
+        try:
+            with os.scandir(abs_dir) as it:
+                entries = [e for e in it
+                           if not e.name.startswith(".") and e.is_dir(follow_symlinks=False)]
+        except OSError:
+            return
+        entries.sort(key=lambda e: (e.name.casefold(), e.name))
+        for entry in entries:
+            if state["count"] >= max_nodes:
+                state["truncated"] = True
+                return
+            state["count"] += 1
+            rel = rel_dir + "/" + entry.name if rel_dir else entry.name
+            is_excl = rel in excl
+            nodes[rel] = {"rel": rel, "name": entry.name, "depth": depth,
+                          "synced": not is_excl, "parent": rel_dir or None}
+            if not is_excl and depth + 1 < max_depth:
+                walk(entry.path, rel, depth + 1)
+
+    walk(root, "", 0)
+
+    for rel in sorted(excl, key=lambda r: (r.count("/"), r)):
+        if rel in nodes:
+            continue
+        parts = rel.split("/")
+        parent = None
+        for k in range(len(parts) - 1, 0, -1):
+            anc = nodes.get("/".join(parts[:k]))
+            if anc is not None and anc["synced"]:
+                parent = anc["rel"]
+                break
+        depth = nodes[parent]["depth"] + 1 if parent else 0
+        nodes[rel] = {"rel": rel, "name": parts[-1], "depth": depth,
+                      "synced": False, "parent": parent}
+
+    children = {}
+    for node in nodes.values():
+        children.setdefault(node["parent"], []).append(node)
+    for siblings in children.values():
+        siblings.sort(key=lambda n: (n["name"].casefold(), n["name"]))
+    ordered = []
+
+    def visit(parent):
+        for node in children.get(parent, []):
+            ordered.append({"rel": node["rel"], "name": node["name"], "depth": node["depth"],
+                            "synced": node["synced"], "hasChildren": node["rel"] in children})
+            visit(node["rel"])
+
+    visit(None)
+    return {"nodes": ordered, "truncated": state["truncated"]}
+
+
+def plan_changes(nodes, excluded, excl_rels, incl_rels):
+    """Validated changes from the dialog answer: (to_add, to_remove) lists of rels.
+
+    to_add: rels that are synced now and were unchecked; only top-most kept.
+    to_remove: rels that were excluded and are checked again. Unknown rels are ignored.
+    """
+    synced = {n["rel"]: n.get("synced") is True for n in nodes}
+    excluded = set(excluded)
+    add = sorted({r for r in excl_rels if isinstance(r, str) and synced.get(r) is True})
+    add = [r for r in add if not any(r.startswith(a + "/") for a in add)]
+    remove = sorted({r for r in incl_rels
+                     if isinstance(r, str) and r in synced and r in excluded})
+    return add, remove
+
+
+def manage_dialog(target):
+    """Dialog mode (`bin/run --manage <target>`): choose which folders sync."""
     try:
         root = dropbox_root()
     except Refusal as exc:
         notify("Dropbox", str(exc))
         return 1
-    folder = os.path.normpath(folder)
-    if not is_under_root(folder, root):
-        notify("Dropbox", OUTSIDE)
-        return 1
-    candidates = excluded_under(folder, root)
-    if not candidates:
-        notify("Dropbox", "Nessuna cartella esclusa in questa posizione.")
-        return 0
-    prefix = folder.rstrip("/") + "/"
-    payload = json.dumps({"folder": folder, "items": [c[len(prefix):] for c in candidates],
-                          "colors": theme_colors(), "font": ui_font()}, ensure_ascii=False)
+    target = os.path.normpath(target)
+    if not is_under_root(target, root):
+        target = root
+    tree = build_tree(root, excluded_dirs())
+    target_rel = rel_of(target, root)
+    listed = {n["rel"] for n in tree["nodes"]}
+    while target_rel and target_rel not in listed:
+        target_rel = target_rel.rpartition("/")[0]  # deepest listed ancestor
+    payload = json.dumps({"root": root, "target": target_rel, "nodes": tree["nodes"],
+                          "truncated": tree["truncated"], "colors": theme_colors(),
+                          "font": ui_font()}, ensure_ascii=False)
     env = dict(os.environ, QT_FORCE_STDERR_LOGGING="1", QT_QPA_PLATFORMTHEME="")
     try:
         proc = subprocess.run([QML, PICKER, "--", payload], stdin=DEVNULL,
@@ -338,24 +431,47 @@ def manage_dialog(folder):
     lines = proc.stderr.decode("utf-8", errors="replace").splitlines()
     if "qml: DBXDONE" not in lines:
         return 0  # closed without confirming
-    allowed = set(candidates)
-    chosen = []
-    for line in lines:
-        if line.startswith("qml: DBXSEL "):
-            full = os.path.normpath(prefix + line[len("qml: DBXSEL "):])
-            if full in allowed:
-                chosen.append(full)
-    if not chosen:
+    excluded = {n["rel"] for n in tree["nodes"] if not n["synced"]}
+    excl_rels = [ln[len(QML_EXCL):] for ln in lines if ln.startswith(QML_EXCL)]
+    incl_rels = [ln[len(QML_INCL):] for ln in lines if ln.startswith(QML_INCL)]
+    to_add, to_remove = plan_changes(tree["nodes"], excluded, excl_rels, incl_rels)
+    return apply_changes(root, to_add, to_remove)
+
+
+def apply_changes(root, to_add, to_remove):
+    if not to_add and not to_remove:
+        notify("Dropbox", "Nessuna modifica alla sincronizzazione.")
         return 0
+
+    def plural(n, one, many):
+        return "%d %s" % (n, one if n == 1 else many)
+
+    steps = []
+    if to_remove:
+        steps.append(("remove", to_remove))
+    if to_add:
+        steps.append(("add", to_add))
     try:
-        rc, _out, err = run_cli([DBX_CLI, "exclude", "remove"] + chosen, timeout=120, cwd="/")
+        for verb, rels in steps:
+            paths = [os.path.join(root, r) for r in rels]
+            rc, _out, err = run_cli([DBX_CLI, "exclude", verb] + paths, timeout=120, cwd="/")
+            if rc != 0:
+                detail = (err or "").strip()
+                notify("Dropbox", "Operazione non riuscita" + (": " + detail if detail else "."))
+                return rc or 1
     except subprocess.TimeoutExpired:
-        rc, err = 1, "timeout"
-    if rc == 0:
-        notify("Dropbox", "Sincronizzazione avviata per %d cartelle." % len(chosen))
-    else:
-        notify("Dropbox", "Operazione non riuscita: " + (err or "").strip()[:200])
-    return rc
+        notify("Dropbox", "Operazione non riuscita: timeout.")
+        return 1
+    except OSError as exc:
+        notify("Dropbox", "Operazione non riuscita: %s" % exc)
+        return 1
+    parts = []
+    if to_add:
+        parts.append(plural(len(to_add), "esclusa", "escluse"))
+    if to_remove:
+        parts.append(plural(len(to_remove), "reinclusa", "reincluse"))
+    notify("Dropbox", "Sincronizzazione aggiornata: " + ", ".join(parts) + ".")
+    return 0
 
 
 def main():

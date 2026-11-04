@@ -3,6 +3,8 @@
 Runs the plugin as a subprocess against a temporary Dropbox root and a fake
 dropbox-cli. FLEA_DROPBOX_NO_SPAWN=1 keeps GUI/browser/clipboard children off.
 """
+import importlib.machinery
+import importlib.util
 import json
 import os
 import select
@@ -13,6 +15,18 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BIN = os.path.join(ROOT, "bin", "run")
+
+
+def load_run():
+    """bin/run has no .py suffix, so load it with an explicit SourceFileLoader."""
+    loader = importlib.machinery.SourceFileLoader("flea_dropbox_run", BIN)
+    spec = importlib.util.spec_from_loader("flea_dropbox_run", loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+run = load_run()
 
 FAKE_CLI = """#!/bin/sh
 echo "$*" >> "$FAKE_DBX_LOG"
@@ -146,11 +160,10 @@ class PluginTest(unittest.TestCase):
         self.assertEqual(reply, {"op": "error",
                                  "message": "Il percorso non è nella cartella Dropbox."})
 
-    def test_manage_without_excluded_error(self):
+    def test_manage_without_excluded_done_without_spawn(self):
         s = self.session()
         reply = s.send({"op": "run", "action": "manage", "paths": [self.empty]})
-        self.assertEqual(reply, {"op": "error",
-                                 "message": "Nessuna cartella esclusa in questa posizione."})
+        self.assertEqual(reply, {"op": "done", "message": "Finestra aperta."})
 
     def test_manage_with_excluded_done_without_spawn(self):
         self.mark_excluded(self.excl)
@@ -163,6 +176,21 @@ class PluginTest(unittest.TestCase):
         s = self.session()
         reply = s.send({"op": "run", "action": "manage", "paths": [], "folder": self.docs})
         self.assertEqual(reply, {"op": "done", "message": "Finestra aperta."})
+
+    def test_manage_outside_dropbox_done(self):
+        s = self.session()
+        reply = s.send({"op": "run", "action": "manage", "paths": ["/etc"]})
+        self.assertEqual(reply, {"op": "done", "message": "Finestra aperta."})
+
+    def test_manage_folder_outside_dropbox_done(self):
+        s = self.session()
+        reply = s.send({"op": "run", "action": "manage", "paths": [], "folder": "/etc"})
+        self.assertEqual(reply, {"op": "done", "message": "Finestra aperta."})
+
+    def test_view_outside_dropbox_opens_home(self):
+        s = self.session()
+        reply = s.send({"op": "run", "action": "view", "paths": ["/etc"]})
+        self.assertEqual(reply, {"op": "done", "message": "Aperto su dropbox.com."})
 
     def test_sharelink_done(self):
         s = self.session()
@@ -194,6 +222,96 @@ class PluginTest(unittest.TestCase):
         s = self.session()
         s.proc.stdin.close()
         self.assertEqual(s.proc.wait(timeout=10), 0)
+
+
+class TreeTest(unittest.TestCase):
+    """Pure functions of bin/run: build_tree and plan_changes."""
+
+    def setUp(self):
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="flea-dropbox-tree-"))
+        self.root = os.path.join(self.tmp, "Dropbox")
+        for d in ("A/B/C/D/E", "alpha", "Beta", "Z", ".hidden/x"):
+            os.makedirs(os.path.join(self.root, d))
+        with open(os.path.join(self.root, "file.txt"), "w", encoding="utf-8") as fh:
+            fh.write("x")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def path(self, rel):
+        return os.path.join(self.root, rel)
+
+    def rels(self, tree):
+        return [n["rel"] for n in tree["nodes"]]
+
+    def test_depth_limit_hidden_skipped_and_files_ignored(self):
+        tree = run.build_tree(self.root, [])
+        self.assertEqual(self.rels(tree), ["A", "A/B", "A/B/C", "A/B/C/D", "alpha", "Beta", "Z"])
+        self.assertFalse(tree["truncated"])
+        d = [n for n in tree["nodes"] if n["rel"] == "A/B/C/D"][0]
+        self.assertEqual(d["depth"], 3)
+        self.assertFalse(d["hasChildren"])  # E would be depth 4: not listed
+
+    def test_order_is_depth_first_case_insensitive(self):
+        tree = run.build_tree(self.root, [])
+        self.assertEqual(self.rels(tree)[-3:], ["alpha", "Beta", "Z"])
+        self.assertEqual(self.rels(tree)[0:2], ["A", "A/B"])
+        self.assertTrue(all(n["synced"] for n in tree["nodes"]))
+
+    def test_has_children_flags(self):
+        tree = run.build_tree(self.root, [self.path("A/B")])
+        nodes = {n["rel"]: n for n in tree["nodes"]}
+        self.assertTrue(nodes["A"]["hasChildren"])
+        self.assertFalse(nodes["A/B"]["hasChildren"])
+        self.assertFalse(nodes["A/B"]["synced"])
+
+    def test_excluded_below_excluded_parent_is_not_walked(self):
+        tree = run.build_tree(self.root, [self.path("A/B")])
+        self.assertNotIn("A/B/C", self.rels(tree))
+
+    def test_excluded_deep_path_inserted_under_listed_ancestor(self):
+        deep = self.path("A/B/C/D/E/Gone")  # not on disk, deeper than the limit
+        tree = run.build_tree(self.root, [deep])
+        nodes = {n["rel"]: n for n in tree["nodes"]}
+        self.assertIn("A/B/C/D/E/Gone", nodes)
+        node = nodes["A/B/C/D/E/Gone"]
+        self.assertEqual(node["name"], "Gone")
+        self.assertEqual(node["depth"], 4)
+        self.assertFalse(node["synced"])
+        self.assertFalse(node["hasChildren"])
+        self.assertTrue(nodes["A/B/C/D"]["hasChildren"])
+
+    def test_excluded_outside_root_or_root_ignored(self):
+        tree = run.build_tree(self.root, ["/etc", self.root])
+        self.assertTrue(all(n["synced"] for n in tree["nodes"]))
+
+    def test_truncation(self):
+        tree = run.build_tree(self.root, [], max_nodes=3)
+        self.assertEqual(len(tree["nodes"]), 3)
+        self.assertTrue(tree["truncated"])
+        full = run.build_tree(self.root, [], max_nodes=100)
+        self.assertFalse(full["truncated"])
+
+    def test_excluded_nodes_survive_truncation(self):
+        tree = run.build_tree(self.root, [self.path("Z")], max_nodes=0)
+        self.assertTrue(tree["truncated"])
+        self.assertEqual(self.rels(tree), ["Z"])
+
+    def test_plan_top_most_only_and_invalid_rels_ignored(self):
+        nodes = [{"rel": "A", "synced": True}, {"rel": "A/B", "synced": True},
+                 {"rel": "AB", "synced": True}, {"rel": "C", "synced": False},
+                 {"rel": "D", "synced": True}]
+        add, remove = run.plan_changes(nodes, {"C"},
+                                       ["A/B", "A", "D", "C", "nope", 7],
+                                       ["C", "D", "nope"])
+        self.assertEqual(add, ["A", "D"])
+        self.assertEqual(remove, ["C"])
+
+    def test_plan_prefix_is_component_boundary(self):
+        nodes = [{"rel": "A", "synced": True}, {"rel": "AB", "synced": True}]
+        add, remove = run.plan_changes(nodes, set(), ["AB", "A"], [])
+        self.assertEqual(add, ["A", "AB"])
+        self.assertEqual(remove, [])
 
 
 if __name__ == "__main__":
