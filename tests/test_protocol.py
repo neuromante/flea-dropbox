@@ -192,6 +192,17 @@ class PluginTest(unittest.TestCase):
         reply = s.send({"op": "run", "action": "view", "paths": ["/etc"]})
         self.assertEqual(reply, {"op": "done", "message": "Aperto su dropbox.com."})
 
+    def test_view_background_inside_opens_folder(self):
+        s = self.session()
+        reply = s.send({"op": "run", "action": "view", "paths": [], "folder": self.docs})
+        self.assertEqual(reply["op"], "done", reply)
+        self.assertIn("https://www.dropbox.com/home/", reply["message"])
+
+    def test_view_background_outside_opens_home(self):
+        s = self.session()
+        reply = s.send({"op": "run", "action": "view", "paths": [], "folder": "/etc"})
+        self.assertEqual(reply, {"op": "done", "message": "Aperto su dropbox.com."})
+
     def test_sharelink_done(self):
         s = self.session()
         reply = s.send({"op": "run", "action": "sharelink", "paths": [self.empty]})

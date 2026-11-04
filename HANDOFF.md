@@ -2,7 +2,8 @@
 
 ## Stato
 
-Versione 0.2.0 (pubblicata su GitHub e installata in Flea da Git il 04/11/2026; collaudo dal vivo pendente).
+Versione 0.2.1 (04/11/2026). 0.2.0 collaudata dal vivo dall'utente dentro Dropbox. 0.2.1: "Visualizza su dropbox.com"
+anche nel menu dello sfondo (cartella aperta, o home fuori da Dropbox); con più elementi selezionati resta nascosta.
 La 0.1.0 è quella installata e verificata in Flea dal 03/11/2026.
 
 Porta il provider Strata Dropbox (`~/.config/strata/providers/dropbox`) al protocollo plugin di Flea,

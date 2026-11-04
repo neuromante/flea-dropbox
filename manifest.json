@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.neuromante.flea-dropbox",
   "name": "Dropbox – sincronizzazione selettiva",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "author": "lorenzo nizzi grifi gargiolli",
   "license": "MIT",
   "description": "Escludi cartelle dalla sincronizzazione Dropbox, gestisci le esclusioni, copia i link condivisi e apri su dropbox.com.",
@@ -33,8 +33,8 @@
       "id": "view",
       "label": "Visualizza su dropbox.com",
       "glyph": "globe",
-      "menus": ["file"],
-      "when": {"minItems": 1, "maxItems": 1, "folders": true}
+      "menus": ["file", "background"],
+      "when": {"minItems": 0, "maxItems": 1, "folders": true}
     }
   ],
   "access": ["selection", "folder", "notify", "network", "exec:dropbox-cli", "exec:wl-copy", "exec:qml6", "exec:systemd-run", "exec:xdg-open", "exec:notify-send", "exec:fc-match"],

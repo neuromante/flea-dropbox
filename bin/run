@@ -262,6 +262,14 @@ def handle_run(req):
     paths = valid_paths(req)
     if action == "manage":
         return {"op": "done", "message": clip(do_manage(req, paths, root))}
+    if action == "view" and not paths:
+        # Background menu: the open folder, or the dropbox.com home outside Dropbox.
+        folder = req.get("folder")
+        if isinstance(folder, str) and folder.startswith("/"):
+            folder = os.path.normpath(folder)
+            if is_under_root(folder, root):
+                return {"op": "done", "message": clip(do_view([folder], root))}
+        paths = ["/"]  # outside Dropbox: falls through to the home page below
     if action == "view" and len(paths) == 1 and not is_under_root(paths[0], root):
         spawn_detached([XDG_OPEN, DROPBOX_HOME])
         return {"op": "done", "message": "Aperto su dropbox.com."}

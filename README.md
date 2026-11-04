@@ -8,8 +8,8 @@ Plugin per il file manager [Flea](https://github.com/thisisgm/flea) che aggiunge
   riselezionando una cartella esclusa la si risincronizza. Disponibile anche dal menu dello sfondo della cartella
   aperta, e si apre sulla cartella selezionata con le sue cartelle genitrici espanse.
 - **Copia link Dropbox**: crea i link condivisi per fino a 10 elementi e li copia negli appunti.
-- **Visualizza su dropbox.com**: apre l'elemento selezionato nel browser. Fuori dalla cartella Dropbox apre la
-  pagina principale di dropbox.com.
+- **Visualizza su dropbox.com**: apre nel browser l'elemento selezionato (un solo elemento) oppure, dal menu dello
+  sfondo, la cartella aperta. Fuori dalla cartella Dropbox apre la pagina principale di dropbox.com.
 
 Il plugin è scritto in Python (solo libreria standard) e usa `dropbox-cli` e il client Dropbox già installato.
 La cartella Dropbox viene letta da `~/.dropbox/info.json`.
