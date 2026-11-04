@@ -6,6 +6,8 @@ Version 0.3.0 (2026-11-04). Repository in English; runtime texts follow Flea's l
 Pending: live check of 0.3.0 in Flea. The user should see Italian runtime texts and the selective-sync window in
 Italian, and English menu labels.
 
+GitHub releases v0.1.0, v0.2.0, v0.2.1 and v0.3.0 (latest) were published on 2026-11-04, with notes taken from `CHANGELOG.md`. Tags: v0.1.0 = 0fd80da, v0.2.0 = ea1ac9d, v0.2.1 = d570fcc, v0.3.0 = 512573c (CHANGELOG commit on top of the 0.3.0 code).
+
 Previous versions: 0.2.1 was verified live by the user on 2026-11-04 (0.2.0 inside Dropbox, 0.2.1 background menu).
 0.1.0 was installed and verified in Flea on 2026-11-03.
 
@@ -61,6 +63,7 @@ as menu actions (`menu-action`). The original Strata provider was not modified.
 - Flea shows no Dropbox status icons.
 - Flea downloads plugins with Git without the global configuration (GIT_CONFIG_GLOBAL/NOSYSTEM): it does not use
   `gh` credentials, so a private repository cannot be installed from its URL. That is why the repository is public.
+- Release flow: bump `version` in manifest.json, add a section to CHANGELOG.md, commit, annotated tag `vX.Y.Z`, push with tags, `gh release create vX.Y.Z --notes-file <section of CHANGELOG>`, then `flea plugin update io.github.neuromante.flea-dropbox`.
 
 ## Request to Flea
 
