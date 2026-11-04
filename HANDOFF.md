@@ -3,8 +3,7 @@
 ## Status
 
 Version 0.3.0 (2026-11-04). Repository in English; runtime texts follow Flea's language (Italian or English).
-Pending: live check of 0.3.0 in Flea. The user should see Italian runtime texts and the selective-sync window in
-Italian, and English menu labels.
+0.3.0 was verified live by the user on 2026-11-04: English menu labels, Italian runtime texts and selective-sync window. Only open item: Flea issue #383.
 
 GitHub releases v0.1.0, v0.2.0, v0.2.1 and v0.3.0 (latest) were published on 2026-11-04, with notes taken from `CHANGELOG.md`. Tags: v0.1.0 = 0fd80da, v0.2.0 = ea1ac9d, v0.2.1 = d570fcc, v0.3.0 = 512573c (CHANGELOG commit on top of the 0.3.0 code).
 
@@ -53,6 +52,7 @@ as menu actions (`menu-action`). The original Strata provider was not modified.
 - 2026-11-03: the user confirmed the plugin works in Flea (0.1.0).
 - 2026-11-04: 0.2.0 tree window on the real Dropbox and outside-Dropbox entries (file and background menus) verified
   live. 0.2.1 verified live.
+- 2026-11-04: 0.3.0 verified live (language handling).
 - Plugin id renamed to `io.github.neuromante.flea-dropbox` (GitHub account neuromante).
 - Public repository: https://github.com/neuromante/flea-dropbox (MIT). Installed in Flea from Git
   (`flea plugin add <url>`); to update: push, then `flea plugin update io.github.neuromante.flea-dropbox`.
