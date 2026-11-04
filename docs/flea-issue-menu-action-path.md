@@ -1,4 +1,4 @@
-<!-- Bozza di issue per github.com/thisisgm/flea (modulo "Feature request"). Non ancora pubblicata. -->
+<!-- Pubblicata il 04/11/2026: https://github.com/thisisgm/flea/issues/383 -->
 
 # Title
 

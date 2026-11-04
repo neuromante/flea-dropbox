@@ -2,7 +2,7 @@
 
 ## Stato
 
-Versione 0.2.0 (in sviluppo in ~/Projects/flea-dropbox, non ancora installata né rilasciata).
+Versione 0.2.0 (pubblicata su GitHub e installata in Flea da Git il 04/11/2026; collaudo dal vivo pendente).
 La 0.1.0 è quella installata e verificata in Flea dal 03/11/2026.
 
 Porta il provider Strata Dropbox (`~/.config/strata/providers/dropbox`) al protocollo plugin di Flea,
@@ -53,3 +53,8 @@ Da verificare dal vivo (non ancora fatto):
 - Nessuna icona di stato Dropbox in Flea.
 - Flea scarica i plugin con Git senza la configurazione globale (GIT_CONFIG_GLOBAL/NOSYSTEM): non usa le credenziali
   di `gh`, quindi un repository privato non si può installare da URL. Per questo il repository è pubblico.
+
+## Richiesta a Flea
+
+- Issue https://github.com/thisisgm/flea/issues/383 (04/11/2026): condizione di percorso nel `when` delle menu-action
+  o risposta dinamica del plugin all'apertura del menu. Se viene accettata, nascondere le voci fuori da Dropbox.
