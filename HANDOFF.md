@@ -1,57 +1,68 @@
 # HANDOFF – flea-dropbox
 
-## Stato
+## Status
 
-Versione 0.2.1 (04/11/2026), collaudata dal vivo dall'utente (0.2.0 dentro Dropbox, 0.2.1 menu dello sfondo). 0.2.1: "Visualizza su dropbox.com"
-anche nel menu dello sfondo (cartella aperta, o home fuori da Dropbox); con più elementi selezionati resta nascosta.
-La 0.1.0 è quella installata e verificata in Flea dal 03/11/2026.
+Version 0.3.0 (2026-11-04). Repository in English; runtime texts follow Flea's language (Italian or English).
+Pending: live check of 0.3.0 in Flea. The user should see Italian runtime texts and the selective-sync window in
+Italian, and English menu labels.
 
-Porta il provider Strata Dropbox (`~/.config/strata/providers/dropbox`) al protocollo plugin di Flea,
-come azioni di menu (`menu-action`). Il provider Strata originale non è stato modificato.
+Previous versions: 0.2.1 was verified live by the user on 2026-11-04 (0.2.0 inside Dropbox, 0.2.1 background menu).
+0.1.0 was installed and verified in Flea on 2026-11-03.
 
-## Fatto
+The plugin ports the Strata Dropbox provider (`~/.config/strata/providers/dropbox`) to Flea's plugin protocol,
+as menu actions (`menu-action`). The original Strata provider was not modified.
 
-- `manifest.json`: id `io.github.neuromante.flea-dropbox`, quattro azioni di menu (exclude, manage, sharelink, view).
-- `bin/run`: protocollo JSON-lines (hello, settings, run, cancel, EOF); errori per richiesta senza uscita del processo.
-  Modalità `--manage <cartella>` per la finestra di gestione delle esclusioni.
-- Finestre e browser avviati con `systemd-run --user --collect --quiet`, fuori dal gruppo di processi e dal limite
-  di memoria di Flea. Fallback: nuova sessione.
-- `picker.qml`: copia invariata dal provider Strata (0.1.0).
+## Done
 
-## Versione 0.2.0
+- `manifest.json`: id `io.github.neuromante.flea-dropbox`, four menu actions (exclude, manage, sharelink, view).
+- `bin/run`: JSON-lines protocol (hello, settings, run, cancel, EOF); errors per request without exiting the process.
+  Dialog mode `--manage <folder> [--lang <xx>]` for the sync-management window.
+- Windows and the browser are started with `systemd-run --user --collect --quiet`, outside Flea's process group and
+  memory limit. Fallback: a new session.
+- `picker.qml`: the dialog. Every visible text comes from the payload's `strings`, with English fallbacks.
 
-- Azione `manage` diventata "Sincronizzazione selettiva Dropbox…" (glifo cloud-upload, stesso id per i key binding).
-  Apre sempre la finestra, anche senza cartelle escluse e anche fuori da Dropbox (cartella di partenza: il
-  percorso selezionato se è una cartella, altrimenti `folder`, altrimenti la radice).
-- Finestra `picker.qml` ad albero: spunta = sincronizzata, esclusa marcata, freccia per espandere, ricerca piatta,
-  Applica/Annulla. Le modifiche tornano come righe `DBXEXCL`/`DBXINCL` e `DBXDONE` su stderr di qml6.
-- `bin/run --manage <cartella>`: `build_tree` (max 4 livelli, 3000 nodi, cartelle nascoste saltate, esclusioni
-  sempre presenti) e `plan_changes` (solo le cartelle più alte, rel validati) sono funzioni pure; poi
-  `dropbox-cli exclude remove` / `add` con cwd "/" e notifica di riepilogo.
-- `view` fuori da Dropbox apre https://www.dropbox.com/home e risponde "Aperto su dropbox.com.".
-- Test: 26 test (protocollo + build_tree + plan_changes), tutti verdi.
+## Version 0.3.0
 
-Verificato dal vivo dall'utente il 04/11/2026: finestra ad albero su Dropbox reale e voci fuori da Dropbox
-(menu del file e dello sfondo). Plugin aggiornato in Flea con `flea plugin update`.
+- Repository translated to English: manifest, code and comments, tests, README, HANDOFF, `docs/`.
+- Menu labels in English (Flea manifests are not localized): "Exclude from Sync", "Dropbox Selective Sync…",
+  "Copy Dropbox Link", "View on dropbox.com".
+- Runtime texts in `bin/run` live in `STRINGS` ("en" and "it"; `tr(key, **fmt)`). Language comes from the hello
+  message's `language` field: "it" when it starts with "it", otherwise "en". Before hello: English.
+- The dialog gets the language through `--lang` (the plugin passes the session language to the child process).
+  Its texts travel in the payload field `strings` (keys `dlg_*`).
+- Tests: 44 tests (protocol, language, build_tree, plan_changes), all passing. Keys of "en" and "it" are checked to match.
 
-- `tests/test_protocol.py`: 29 test, tutti verdi (`python3 -m unittest discover -s tests -v`).
-- `flea plugin validate` senza output, uscita 0.
+## Version 0.2.0 and 0.2.1
 
-## Verifica dal vivo
+- Action `manage` became "Dropbox Selective Sync…" (glyph cloud-upload, same id for key bindings). It always opens
+  the window, even without excluded folders and even outside Dropbox (starting folder: the selected path if it is a
+  folder, otherwise `folder`, otherwise the root).
+- Tree window `picker.qml`: tick = synced, excluded marked, arrow to expand, flat search, Apply/Cancel. Changes come
+  back as `DBXEXCL`/`DBXINCL` lines and `DBXDONE` on qml6's stderr.
+- `bin/run --manage <folder>`: `build_tree` (max 4 levels, 3000 nodes, hidden folders skipped, exclusions always
+  present) and `plan_changes` (only top-most folders, validated rels) are pure functions; then
+  `dropbox-cli exclude remove` / `add` with cwd "/" and a summary notification.
+- `view` outside Dropbox opens https://www.dropbox.com/home.
+- 0.2.1: "View on dropbox.com" also in the background menu (open folder, or the home page outside Dropbox); hidden
+  when several items are selected.
 
-- 03/11/2026: l'utente conferma che il plugin funziona in Flea.
-- Id rinominato in `io.github.neuromante.flea-dropbox` (account GitHub neuromante).
-- Repository pubblico: https://github.com/neuromante/flea-dropbox (licenza MIT). Installazione in Flea da Git
-  (`flea plugin add <url>`); per aggiornare: push, poi `flea plugin update io.github.neuromante.flea-dropbox`.
+## Live checks
 
-## Note
+- 2026-11-03: the user confirmed the plugin works in Flea (0.1.0).
+- 2026-11-04: 0.2.0 tree window on the real Dropbox and outside-Dropbox entries (file and background menus) verified
+  live. 0.2.1 verified live.
+- Plugin id renamed to `io.github.neuromante.flea-dropbox` (GitHub account neuromante).
+- Public repository: https://github.com/neuromante/flea-dropbox (MIT). Installed in Flea from Git
+  (`flea plugin add <url>`); to update: push, then `flea plugin update io.github.neuromante.flea-dropbox`.
 
-- La lista `access` dichiara tutti i programmi eseguiti (dropbox-cli, wl-copy, qml6, systemd-run, xdg-open, notify-send, fc-match).
-- Nessuna icona di stato Dropbox in Flea.
-- Flea scarica i plugin con Git senza la configurazione globale (GIT_CONFIG_GLOBAL/NOSYSTEM): non usa le credenziali
-  di `gh`, quindi un repository privato non si può installare da URL. Per questo il repository è pubblico.
+## Notes
 
-## Richiesta a Flea
+- The `access` list declares every program run (dropbox-cli, wl-copy, qml6, systemd-run, xdg-open, notify-send, fc-match).
+- Flea shows no Dropbox status icons.
+- Flea downloads plugins with Git without the global configuration (GIT_CONFIG_GLOBAL/NOSYSTEM): it does not use
+  `gh` credentials, so a private repository cannot be installed from its URL. That is why the repository is public.
 
-- Issue https://github.com/thisisgm/flea/issues/383 (04/11/2026): condizione di percorso nel `when` delle menu-action
-  o risposta dinamica del plugin all'apertura del menu. Se viene accettata, nascondere le voci fuori da Dropbox.
+## Request to Flea
+
+- Issue https://github.com/thisisgm/flea/issues/383 (2026-11-04): a path condition in the `when` of menu-actions, or a
+  dynamic answer from the plugin when the menu opens. If accepted, hide the entries outside Dropbox.

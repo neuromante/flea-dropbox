@@ -3,7 +3,12 @@
 
 Protocol: newline-delimited JSON on stdin/stdout. Stdout carries protocol
 replies only; every child process gets stdout/stderr/stdin redirected away
-from it. `--manage <target>` runs the selective-sync dialog (launched detached).
+from it. `--manage <target> [--lang <xx>]` runs the selective-sync dialog
+(launched detached by the plugin, never waited for).
+
+Language: the hello message may carry "language"; Italian when it starts
+with "it", English otherwise. Requests before hello use English. Every
+user-visible text lives in STRINGS, keyed by language.
 
 Test overrides (environment):
   FLEA_DROPBOX_CLI      dropbox-cli binary (default /usr/bin/dropbox-cli)
@@ -45,14 +50,132 @@ PICKER = os.path.join(os.path.dirname(os.path.dirname(SELF)), "picker.qml")
 THEME_COLORS = os.path.join(os.path.expanduser("~"), ".local", "state", "omarchy",
                             "current", "theme", "colors.toml")
 
-OUTSIDE = "Il percorso non è nella cartella Dropbox."
 DEVNULL = subprocess.DEVNULL
 QML_EXCL = "qml: DBXEXCL "
 QML_INCL = "qml: DBXINCL "
 
+# Every user-visible text, per language. Keys starting with "dlg_" are sent to
+# the dialog (picker.qml) in the payload's "strings" field. "{name}" marks a
+# value filled in by tr(); "{n}" in the dialog keys is filled in by picker.qml.
+STRINGS = {
+    "en": {
+        # Runtime replies and notifications.
+        "dropbox_not_found": "Dropbox folder not found (info.json missing or invalid).",
+        "invalid_paths": "Invalid paths.",
+        "outside_dropbox": "The path is not inside the Dropbox folder.",
+        "unknown_action": "Unknown action: {action}",
+        "nothing_selected": "No item selected.",
+        "window_systemd_timeout": "Cannot open the window: systemd-run is not responding.",
+        "window_start_failed": "Cannot open the window: {detail}",
+        "window_open_failed": "Cannot open the window: {detail}",
+        "window_opened": "Window opened.",
+        "opened_home": "Opened on dropbox.com.",
+        "opened_url": "Opened on dropbox.com: {url}",
+        "select_one": "Select only one item.",
+        "exclude_nothing": "No folder to exclude from sync.",
+        "exclude_failed": "Exclusion failed",
+        "exclude_timeout": "Exclusion failed: timeout.",
+        "excluded_done": "Excluded from sync: {paths}",
+        "no_links": "No Dropbox link created for the selected paths.",
+        "clipboard_failed": "Could not copy to the clipboard. Links: {urls}",
+        "link_copied": "Link copied to the clipboard: {urls}",
+        "links_missing": " (no link for {n} path(s))",
+        "operation_failed": "Operation failed",
+        "operation_timeout": "Operation failed: timeout.",
+        "sync_updated": "Sync updated: {changes}.",
+        "no_sync_changes": "No change to sync settings.",
+        "excluded_one": "{n} folder excluded",
+        "excluded_many": "{n} folders excluded",
+        "included_one": "{n} folder re-included",
+        "included_many": "{n} folders re-included",
+        "invalid_request": "Invalid request.",
+        "unsupported_op": "Unsupported operation: {op}",
+        "internal_error": "Internal error: {detail}",
+        # Selective-sync dialog (picker.qml).
+        "dlg_window_title": "Dropbox – selective sync",
+        "dlg_header": "Selective sync",
+        "dlg_filter_placeholder": "Find folder…  (/ or just type)",
+        "dlg_keys_hint": "↑↓ move   Space tick   ←→ open/close   / search   Esc close",
+        "dlg_cancel": "Cancel",
+        "dlg_apply": "Apply",
+        "dlg_excluded_tag": "excluded",
+        "dlg_pending_exclude": "{n} to exclude",
+        "dlg_pending_include": "{n} to re-include",
+        "dlg_no_changes": "No changes",
+        "dlg_truncated": "Partial list: folders too deep or too many",
+        "dlg_no_folders": "No folders found",
+    },
+    "it": {
+        "dropbox_not_found": "Cartella Dropbox non trovata (info.json mancante o non valido).",
+        "invalid_paths": "Percorsi non validi.",
+        "outside_dropbox": "Il percorso non è nella cartella Dropbox.",
+        "unknown_action": "Azione sconosciuta: {action}",
+        "nothing_selected": "Nessun elemento selezionato.",
+        "window_systemd_timeout": "Impossibile avviare la finestra: systemd-run non risponde.",
+        "window_start_failed": "Impossibile avviare la finestra: {detail}",
+        "window_open_failed": "Impossibile aprire la finestra: {detail}",
+        "window_opened": "Finestra aperta.",
+        "opened_home": "Aperto su dropbox.com.",
+        "opened_url": "Aperto su dropbox.com: {url}",
+        "select_one": "Seleziona un solo elemento.",
+        "exclude_nothing": "Nessuna cartella da escludere dalla sincronizzazione.",
+        "exclude_failed": "Esclusione non riuscita",
+        "exclude_timeout": "Esclusione non riuscita: timeout.",
+        "excluded_done": "Escluse dalla sincronizzazione: {paths}",
+        "no_links": "Nessun link Dropbox creato per i percorsi selezionati.",
+        "clipboard_failed": "Impossibile copiare negli appunti. Link: {urls}",
+        "link_copied": "Link copiato negli appunti: {urls}",
+        "links_missing": " (nessun link per {n} percorso/i)",
+        "operation_failed": "Operazione non riuscita",
+        "operation_timeout": "Operazione non riuscita: timeout.",
+        "sync_updated": "Sincronizzazione aggiornata: {changes}.",
+        "no_sync_changes": "Nessuna modifica alla sincronizzazione.",
+        "excluded_one": "{n} esclusa",
+        "excluded_many": "{n} escluse",
+        "included_one": "{n} reinclusa",
+        "included_many": "{n} reincluse",
+        "invalid_request": "Richiesta non valida.",
+        "unsupported_op": "Operazione non supportata: {op}",
+        "internal_error": "Errore interno: {detail}",
+        "dlg_window_title": "Dropbox – sincronizzazione selettiva",
+        "dlg_header": "Sincronizzazione selettiva",
+        "dlg_filter_placeholder": "Cerca cartella…  (/ oppure digita)",
+        "dlg_keys_hint": "↑↓ naviga   Spazio spunta   ←→ apri/chiudi   / cerca   Esc chiudi",
+        "dlg_cancel": "Annulla",
+        "dlg_apply": "Applica",
+        "dlg_excluded_tag": "esclusa",
+        "dlg_pending_exclude": "{n} da escludere",
+        "dlg_pending_include": "{n} da reincludere",
+        "dlg_no_changes": "Nessuna modifica",
+        "dlg_truncated": "Elenco parziale: cartelle troppo profonde o numerose",
+        "dlg_no_folders": "Nessuna cartella trovata",
+    },
+}
+
+LANG = "en"  # set by hello (or --lang in dialog mode); English until then
+
 
 class Refusal(Exception):
     """Expected, user-facing failure: answered as an error, no traceback."""
+
+
+def normalize_lang(value):
+    """Italian when the language code starts with "it", English otherwise."""
+    if isinstance(value, str) and value.strip().lower().startswith("it"):
+        return "it"
+    return "en"
+
+
+def tr(key, **fmt):
+    """Text for `key` in the current language, with English as the fallback."""
+    text = STRINGS.get(LANG, {}).get(key) or STRINGS["en"][key]
+    return text.format(**fmt) if fmt else text
+
+
+def dialog_strings():
+    """UI texts of the selective-sync dialog (keys prefixed "dlg_") in the current language."""
+    table = STRINGS.get(LANG) or STRINGS["en"]
+    return {k: v for k, v in table.items() if k.startswith("dlg_")}
 
 
 def emit(obj):
@@ -66,11 +189,12 @@ def clip(text, limit=MAX_MESSAGE):
 
 
 def dropbox_root():
+    """Root folder from info.json (personal, then business); Refusal if none."""
     try:
         with open(INFO_PATH, "r", encoding="utf-8") as fh:
             info = json.load(fh)
     except (OSError, ValueError):
-        raise Refusal("Cartella Dropbox non trovata (info.json mancante o non valido).")
+        raise Refusal(tr("dropbox_not_found"))
     if isinstance(info, dict):
         for key in ("personal", "business"):
             entry = info.get(key)
@@ -78,7 +202,7 @@ def dropbox_root():
                 root = entry.get("path")
                 if isinstance(root, str) and root.startswith("/"):
                     return os.path.normpath(root)
-    raise Refusal("Cartella Dropbox non trovata (info.json mancante o non valido).")
+    raise Refusal(tr("dropbox_not_found"))
 
 
 def valid_paths(req):
@@ -87,11 +211,11 @@ def valid_paths(req):
     if raw is None:
         return []
     if not isinstance(raw, list):
-        raise Refusal("Percorsi non validi.")
+        raise Refusal(tr("invalid_paths"))
     result = []
     for p in raw:
         if not isinstance(p, str) or not p.startswith("/"):
-            raise Refusal("Percorsi non validi.")
+            raise Refusal(tr("invalid_paths"))
         result.append(os.path.normpath(p))
     return result
 
@@ -149,7 +273,7 @@ def spawn_detached(cmd):
                                 stdin=DEVNULL, stdout=DEVNULL, stderr=DEVNULL,
                                 timeout=5, check=False).returncode
         except subprocess.TimeoutExpired:
-            raise Refusal("Impossibile avviare la finestra: systemd-run non risponde.")
+            raise Refusal(tr("window_systemd_timeout"))
         except OSError:
             rc = -1
         if rc == 0:
@@ -158,7 +282,7 @@ def spawn_detached(cmd):
         subprocess.Popen(cmd, stdin=DEVNULL, stdout=DEVNULL, stderr=DEVNULL,
                          start_new_session=True)
     except OSError as exc:
-        raise Refusal("Impossibile avviare la finestra: %s" % exc)
+        raise Refusal(tr("window_start_failed", detail=exc))
 
 
 def excluded_dirs():
@@ -176,15 +300,15 @@ def excluded_dirs():
 def do_exclude(paths, root):
     dirs = [p for p in paths if p != root and is_directory(p)]
     if not dirs:
-        raise Refusal("Nessuna cartella da escludere dalla sincronizzazione.")
+        raise Refusal(tr("exclude_nothing"))
     try:
         rc, _out, err = run_cli([DBX_CLI, "exclude", "add"] + dirs, timeout=6)
     except subprocess.TimeoutExpired:
-        raise Refusal("Esclusione non riuscita: timeout.")
+        raise Refusal(tr("exclude_timeout"))
     if rc != 0:
         detail = (err or "").strip()
-        raise Refusal("Esclusione non riuscita" + (": " + detail if detail else "."))
-    return "Escluse dalla sincronizzazione: " + ", ".join(dirs)
+        raise Refusal(tr("exclude_failed") + (": " + detail if detail else "."))
+    return tr("excluded_done", paths=", ".join(dirs))
 
 
 def do_sharelink(paths, root):
@@ -208,7 +332,7 @@ def do_sharelink(paths, root):
         else:
             failed += 1
     if not urls:
-        raise Refusal("Nessun link Dropbox creato per i percorsi selezionati.")
+        raise Refusal(tr("no_links"))
     text = "\n".join(urls)
     if not NO_SPAWN:
         try:
@@ -216,16 +340,16 @@ def do_sharelink(paths, root):
         except (subprocess.TimeoutExpired, OSError):
             rc = 1
         if rc != 0:
-            raise Refusal("Impossibile copiare negli appunti. Link: " + ", ".join(urls))
-    message = "Link copiato negli appunti: " + ", ".join(urls)
+            raise Refusal(tr("clipboard_failed", urls=", ".join(urls)))
+    message = tr("link_copied", urls=", ".join(urls))
     if failed or skipped:
-        message += " (nessun link per %d percorso/i)" % (failed + skipped)
+        message += tr("links_missing", n=failed + skipped)
     return message
 
 
 def do_view(paths, root):
     if len(paths) != 1:
-        raise Refusal("Seleziona un solo elemento.")
+        raise Refusal(tr("select_one"))
     path = paths[0]
     rel = os.path.relpath(path, root)
     if rel == ".":
@@ -236,7 +360,7 @@ def do_view(paths, root):
         parent, name = os.path.split(rel)
         url = DROPBOX_HOME + "/" + quote(parent) + "?preview=" + quote(name)
     spawn_detached([XDG_OPEN, url])
-    return "Aperto su dropbox.com: " + url
+    return tr("opened_url", url=url)
 
 
 def do_manage(req, paths, root):
@@ -250,14 +374,14 @@ def do_manage(req, paths, root):
             candidate = os.path.normpath(folder)
             if is_under_root(candidate, root):
                 target = candidate
-    spawn_detached([PYTHON, "-I", SELF, "--manage", target])
-    return "Finestra aperta."
+    spawn_detached([PYTHON, "-I", SELF, "--manage", target, "--lang", LANG])
+    return tr("window_opened")
 
 
 def handle_run(req):
     action = req.get("action")
     if action not in ("exclude", "manage", "sharelink", "view"):
-        raise Refusal("Azione sconosciuta: %s" % clip(action, 60))
+        raise Refusal(tr("unknown_action", action=clip(action, 60)))
     root = dropbox_root()
     paths = valid_paths(req)
     if action == "manage":
@@ -272,12 +396,12 @@ def handle_run(req):
         paths = ["/"]  # outside Dropbox: falls through to the home page below
     if action == "view" and len(paths) == 1 and not is_under_root(paths[0], root):
         spawn_detached([XDG_OPEN, DROPBOX_HOME])
-        return {"op": "done", "message": "Aperto su dropbox.com."}
+        return {"op": "done", "message": tr("opened_home")}
     if not paths:
-        raise Refusal("Nessun elemento selezionato.")
+        raise Refusal(tr("nothing_selected"))
     for p in paths:
         if not is_under_root(p, root):
-            raise Refusal(OUTSIDE)
+            raise Refusal(tr("outside_dropbox"))
     if action == "exclude":
         message = do_exclude(paths, root)
     elif action == "sharelink":
@@ -288,14 +412,16 @@ def handle_run(req):
 
 
 def handle_request(req):
+    global LANG
     op = req.get("op")
     if op == "hello":
+        LANG = normalize_lang(req.get("language"))
         return {"op": "ready", "protocolVersion": PROTOCOL_VERSION}
     if op == "settings":
         return {"op": "done"}
     if op == "run":
         return handle_run(req)
-    return {"op": "error", "message": clip("Operazione non supportata: %s" % (op,), 120)}
+    return {"op": "error", "message": clip(tr("unsupported_op", op=op), 120)}
 
 
 def notify(title, body):
@@ -414,8 +540,10 @@ def plan_changes(nodes, excluded, excl_rels, incl_rels):
     return add, remove
 
 
-def manage_dialog(target):
-    """Dialog mode (`bin/run --manage <target>`): choose which folders sync."""
+def manage_dialog(target, lang="en"):
+    """Dialog mode (`bin/run --manage <target> --lang <xx>`): choose which folders sync."""
+    global LANG
+    LANG = normalize_lang(lang)
     try:
         root = dropbox_root()
     except Refusal as exc:
@@ -431,7 +559,8 @@ def manage_dialog(target):
         target_rel = target_rel.rpartition("/")[0]  # deepest listed ancestor
     payload = json.dumps({"root": root, "target": target_rel, "nodes": tree["nodes"],
                           "truncated": tree["truncated"], "colors": theme_colors(),
-                          "font": ui_font()}, ensure_ascii=False)
+                          "font": ui_font(), "strings": dialog_strings()},
+                         ensure_ascii=False)
     # The payload goes through a private file: one argv string is capped at 128 KiB.
     env = dict(os.environ, QT_FORCE_STDERR_LOGGING="1", QT_QPA_PLATFORMTHEME="",
                QML_XHR_ALLOW_FILE_READ="1")
@@ -444,7 +573,7 @@ def manage_dialog(target):
             proc = subprocess.run([QML, PICKER, "--", fh.name], stdin=DEVNULL,
                                   stdout=DEVNULL, stderr=subprocess.PIPE, env=env, check=False)
     except OSError as exc:
-        notify("Dropbox", "Impossibile aprire la finestra: %s" % exc)
+        notify("Dropbox", tr("window_open_failed", detail=exc))
         return 1
     lines = proc.stderr.decode("utf-8", errors="replace").splitlines()
     if "qml: DBXDONE" not in lines:
@@ -457,12 +586,10 @@ def manage_dialog(target):
 
 
 def apply_changes(root, to_add, to_remove):
+    """Apply the dialog answer with dropbox-cli, then notify a summary."""
     if not to_add and not to_remove:
-        notify("Dropbox", "Nessuna modifica alla sincronizzazione.")
+        notify("Dropbox", tr("no_sync_changes"))
         return 0
-
-    def plural(n, one, many):
-        return "%d %s" % (n, one if n == 1 else many)
 
     steps = []
     if to_remove:
@@ -475,24 +602,43 @@ def apply_changes(root, to_add, to_remove):
             rc, _out, err = run_cli([DBX_CLI, "exclude", verb] + paths, timeout=120, cwd="/")
             if rc != 0:
                 detail = (err or "").strip()
-                notify("Dropbox", "Operazione non riuscita" + (": " + detail if detail else "."))
+                notify("Dropbox", tr("operation_failed") + (": " + detail if detail else "."))
                 return rc or 1
     except subprocess.TimeoutExpired:
-        notify("Dropbox", "Operazione non riuscita: timeout.")
+        notify("Dropbox", tr("operation_timeout"))
         return 1
     except OSError as exc:
-        notify("Dropbox", "Operazione non riuscita: %s" % exc)
+        notify("Dropbox", tr("operation_failed") + ": " + str(exc))
         return 1
     parts = []
     if to_add:
-        parts.append(plural(len(to_add), "esclusa", "escluse"))
+        parts.append(tr("excluded_one" if len(to_add) == 1 else "excluded_many", n=len(to_add)))
     if to_remove:
-        parts.append(plural(len(to_remove), "reinclusa", "reincluse"))
-    notify("Dropbox", "Sincronizzazione aggiornata: " + ", ".join(parts) + ".")
+        parts.append(tr("included_one" if len(to_remove) == 1 else "included_many",
+                        n=len(to_remove)))
+    notify("Dropbox", tr("sync_updated", changes=", ".join(parts)))
     return 0
 
 
+def parse_manage_args(args):
+    """Parse the dialog arguments `--manage <target> [--lang <xx>]` (program name excluded).
+
+    Returns (target, lang). Raises ValueError on any other shape.
+    """
+    if len(args) < 2 or args[0] != "--manage":
+        raise ValueError("expected --manage <target>")
+    target = args[1]
+    rest = list(args[2:])
+    lang = "en"
+    if rest:
+        if len(rest) != 2 or rest[0] != "--lang":
+            raise ValueError("expected --lang <xx>")
+        lang = normalize_lang(rest[1])
+    return target, lang
+
+
 def main():
+    """Serve protocol requests from stdin until cancel or EOF."""
     for raw in sys.stdin.buffer:
         line = raw.strip()
         if not line:
@@ -502,7 +648,7 @@ def main():
             if not isinstance(req, dict):
                 raise ValueError("not an object")
         except (ValueError, UnicodeDecodeError):
-            emit({"op": "error", "message": "Richiesta non valida."})
+            emit({"op": "error", "message": tr("invalid_request")})
             continue
         if req.get("op") == "cancel":
             return 0
@@ -511,7 +657,7 @@ def main():
         except Refusal as exc:
             reply = {"op": "error", "message": clip(exc)}
         except Exception as exc:  # never crash the loop
-            reply = {"op": "error", "message": clip("Errore interno: %s" % exc)}
+            reply = {"op": "error", "message": clip(tr("internal_error", detail=exc))}
         try:
             emit(reply)
         except BrokenPipeError:
@@ -520,8 +666,12 @@ def main():
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 3 and sys.argv[1] == "--manage":
-        sys.exit(manage_dialog(sys.argv[2]))
+    if len(sys.argv) > 1 and sys.argv[1] == "--manage":
+        try:
+            manage_target, manage_lang = parse_manage_args(sys.argv[1:])
+        except ValueError:
+            sys.exit(2)
+        sys.exit(manage_dialog(manage_target, manage_lang))
     try:
         sys.exit(main())
     except (KeyboardInterrupt, BrokenPipeError):

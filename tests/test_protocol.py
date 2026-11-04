@@ -118,9 +118,14 @@ class PluginTest(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def session(self):
+    def session(self, language="en"):
+        """Start bin/run and send hello; `language` None omits the language field."""
         s = Session(self.env)
         self.addCleanup(s.close)
+        hello = {"op": "hello", "protocolVersion": 1}
+        if language is not None:
+            hello["language"] = language
+        self.assertEqual(s.send(hello), {"op": "ready", "protocolVersion": 1})
         return s
 
     def cli_log(self):
@@ -154,60 +159,118 @@ class PluginTest(unittest.TestCase):
         self.assertEqual(reply["op"], "error", reply)
         self.assertNotIn("exclude add", self.cli_log())
 
-    def test_path_outside_root_error(self):
-        s = self.session()
+    def test_path_outside_root_error_english(self):
+        s = self.session("en")
+        reply = s.send({"op": "run", "action": "sharelink", "paths": ["/etc"]})
+        self.assertEqual(reply, {"op": "error",
+                                 "message": "The path is not inside the Dropbox folder."})
+
+    def test_path_outside_root_error_italian(self):
+        s = self.session("it")
         reply = s.send({"op": "run", "action": "sharelink", "paths": ["/etc"]})
         self.assertEqual(reply, {"op": "error",
                                  "message": "Il percorso non è nella cartella Dropbox."})
 
+    def test_english_when_hello_has_no_language(self):
+        s = self.session(None)
+        reply = s.send({"op": "run", "action": "sharelink", "paths": ["/etc"]})
+        self.assertEqual(reply["message"], "The path is not inside the Dropbox folder.")
+
+    def test_english_before_any_hello(self):
+        s = Session(self.env)
+        self.addCleanup(s.close)
+        reply = s.send({"op": "run", "action": "sharelink", "paths": ["/etc"]})
+        self.assertEqual(reply["message"], "The path is not inside the Dropbox folder.")
+
+    def test_language_is_matched_by_prefix(self):
+        s = self.session("it-IT")
+        reply = s.send({"op": "run", "action": "sharelink", "paths": ["/etc"]})
+        self.assertEqual(reply["message"], "Il percorso non è nella cartella Dropbox.")
+        self.assertEqual(s.send({"op": "hello", "protocolVersion": 1, "language": "fr"}),
+                         {"op": "ready", "protocolVersion": 1})
+        reply = s.send({"op": "run", "action": "sharelink", "paths": ["/etc"]})
+        self.assertEqual(reply["message"], "The path is not inside the Dropbox folder.")
+
+    def test_unknown_op_english_and_italian(self):
+        s = self.session("en")
+        self.assertEqual(s.send({"op": "bogus"}),
+                         {"op": "error", "message": "Unsupported operation: bogus"})
+        s = self.session("it")
+        self.assertEqual(s.send({"op": "bogus"}),
+                         {"op": "error", "message": "Operazione non supportata: bogus"})
+
     def test_manage_without_excluded_done_without_spawn(self):
-        s = self.session()
+        s = self.session("en")
         reply = s.send({"op": "run", "action": "manage", "paths": [self.empty]})
-        self.assertEqual(reply, {"op": "done", "message": "Finestra aperta."})
+        self.assertEqual(reply, {"op": "done", "message": "Window opened."})
 
     def test_manage_with_excluded_done_without_spawn(self):
         self.mark_excluded(self.excl)
-        s = self.session()
+        s = self.session("it")
         reply = s.send({"op": "run", "action": "manage", "paths": [self.docs]})
         self.assertEqual(reply, {"op": "done", "message": "Finestra aperta."})
 
     def test_manage_uses_folder_field_for_background_menu(self):
         self.mark_excluded(self.excl)
-        s = self.session()
+        s = self.session("en")
         reply = s.send({"op": "run", "action": "manage", "paths": [], "folder": self.docs})
-        self.assertEqual(reply, {"op": "done", "message": "Finestra aperta."})
+        self.assertEqual(reply, {"op": "done", "message": "Window opened."})
 
     def test_manage_outside_dropbox_done(self):
-        s = self.session()
+        s = self.session("en")
         reply = s.send({"op": "run", "action": "manage", "paths": ["/etc"]})
-        self.assertEqual(reply, {"op": "done", "message": "Finestra aperta."})
+        self.assertEqual(reply, {"op": "done", "message": "Window opened."})
 
     def test_manage_folder_outside_dropbox_done(self):
-        s = self.session()
+        s = self.session("it")
         reply = s.send({"op": "run", "action": "manage", "paths": [], "folder": "/etc"})
         self.assertEqual(reply, {"op": "done", "message": "Finestra aperta."})
 
-    def test_view_outside_dropbox_opens_home(self):
-        s = self.session()
+    def test_view_outside_dropbox_opens_home_english(self):
+        s = self.session("en")
+        reply = s.send({"op": "run", "action": "view", "paths": ["/etc"]})
+        self.assertEqual(reply, {"op": "done", "message": "Opened on dropbox.com."})
+
+    def test_view_outside_dropbox_opens_home_italian(self):
+        s = self.session("it")
         reply = s.send({"op": "run", "action": "view", "paths": ["/etc"]})
         self.assertEqual(reply, {"op": "done", "message": "Aperto su dropbox.com."})
 
     def test_view_background_inside_opens_folder(self):
-        s = self.session()
+        s = self.session("en")
         reply = s.send({"op": "run", "action": "view", "paths": [], "folder": self.docs})
         self.assertEqual(reply["op"], "done", reply)
         self.assertIn("https://www.dropbox.com/home/", reply["message"])
+        self.assertTrue(reply["message"].startswith("Opened on dropbox.com: "), reply)
+
+    def test_view_background_inside_opens_folder_italian(self):
+        s = self.session("it")
+        reply = s.send({"op": "run", "action": "view", "paths": [], "folder": self.docs})
+        self.assertEqual(reply["op"], "done", reply)
+        self.assertTrue(reply["message"].startswith("Aperto su dropbox.com: "), reply)
 
     def test_view_background_outside_opens_home(self):
-        s = self.session()
+        s = self.session("en")
         reply = s.send({"op": "run", "action": "view", "paths": [], "folder": "/etc"})
-        self.assertEqual(reply, {"op": "done", "message": "Aperto su dropbox.com."})
+        self.assertEqual(reply, {"op": "done", "message": "Opened on dropbox.com."})
+
+    def test_view_several_items_english_error(self):
+        s = self.session("en")
+        reply = s.send({"op": "run", "action": "view", "paths": [self.docs, self.empty]})
+        self.assertEqual(reply, {"op": "error", "message": "Select only one item."})
 
     def test_sharelink_done(self):
-        s = self.session()
+        s = self.session("en")
         reply = s.send({"op": "run", "action": "sharelink", "paths": [self.empty]})
         self.assertEqual(reply["op"], "done", reply)
         self.assertIn("https://www.dropbox.com/scl/fo/fake/", reply["message"])
+        self.assertTrue(reply["message"].startswith("Link copied to the clipboard: "), reply)
+
+    def test_sharelink_done_italian(self):
+        s = self.session("it")
+        reply = s.send({"op": "run", "action": "sharelink", "paths": [self.empty]})
+        self.assertEqual(reply["op"], "done", reply)
+        self.assertTrue(reply["message"].startswith("Link copiato negli appunti: "), reply)
 
     def test_view_done_without_spawn(self):
         s = self.session()
@@ -233,6 +296,71 @@ class PluginTest(unittest.TestCase):
         s = self.session()
         s.proc.stdin.close()
         self.assertEqual(s.proc.wait(timeout=10), 0)
+
+
+class LanguageTest(unittest.TestCase):
+    """In-process checks of the language tables and the dialog arguments."""
+
+    def setUp(self):
+        self.saved_lang = run.LANG
+        self.addCleanup(setattr, run, "LANG", self.saved_lang)
+
+    def test_every_english_key_has_italian_and_back(self):
+        self.assertEqual(set(run.STRINGS["en"]), set(run.STRINGS["it"]))
+
+    def test_no_empty_texts(self):
+        for lang in ("en", "it"):
+            for key, text in run.STRINGS[lang].items():
+                self.assertTrue(text.strip(), (lang, key))
+
+    def test_dialog_strings_follow_language(self):
+        run.LANG = "en"
+        english = run.dialog_strings()
+        self.assertEqual(english["dlg_cancel"], "Cancel")
+        self.assertTrue(all(k.startswith("dlg_") for k in english))
+        run.LANG = "it"
+        italian = run.dialog_strings()
+        self.assertEqual(italian["dlg_cancel"], "Annulla")
+        self.assertEqual(set(italian), set(english))
+
+    def test_normalize_lang(self):
+        self.assertEqual(run.normalize_lang("it"), "it")
+        self.assertEqual(run.normalize_lang("it_IT.UTF-8"), "it")
+        self.assertEqual(run.normalize_lang("en-US"), "en")
+        self.assertEqual(run.normalize_lang("fr"), "en")
+        self.assertEqual(run.normalize_lang(None), "en")
+        self.assertEqual(run.normalize_lang(7), "en")
+
+    def test_parse_manage_args(self):
+        self.assertEqual(run.parse_manage_args(["--manage", "/x"]), ("/x", "en"))
+        self.assertEqual(run.parse_manage_args(["--manage", "/x", "--lang", "it"]),
+                         ("/x", "it"))
+        self.assertEqual(run.parse_manage_args(["--manage", "/x", "--lang", "de"]),
+                         ("/x", "en"))
+        for bad in (["--manage"], ["--manage", "/x", "--lang"],
+                    ["--manage", "/x", "--other", "it"], ["--lang", "it"]):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                run.parse_manage_args(bad)
+
+    def test_manage_child_gets_session_language(self):
+        tmp = tempfile.mkdtemp(prefix="flea-dropbox-lang-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        info = os.path.join(tmp, "info.json")
+        with open(info, "w", encoding="utf-8") as fh:
+            json.dump({"personal": {"path": tmp}}, fh)
+        saved_info = run.INFO_PATH
+        run.INFO_PATH = info
+        self.addCleanup(setattr, run, "INFO_PATH", saved_info)
+        spawned = []
+        saved_spawn = run.spawn_detached
+        run.spawn_detached = spawned.append
+        self.addCleanup(setattr, run, "spawn_detached", saved_spawn)
+        run.handle_request({"op": "hello", "protocolVersion": 1, "language": "it"})
+        reply = run.handle_request({"op": "run", "action": "manage", "paths": []})
+        self.assertEqual(reply, {"op": "done", "message": "Finestra aperta."})
+        self.assertEqual(len(spawned), 1, spawned)
+        self.assertEqual(spawned[0][-4:-2], ["--manage", tmp])
+        self.assertEqual(spawned[0][-2:], ["--lang", "it"])
 
 
 class TreeTest(unittest.TestCase):

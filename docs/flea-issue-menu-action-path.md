@@ -1,4 +1,4 @@
-<!-- Pubblicata il 04/11/2026: https://github.com/thisisgm/flea/issues/383 -->
+<!-- Published on 2026-11-04: https://github.com/thisisgm/flea/issues/383 -->
 
 # Title
 

@@ -1,37 +1,37 @@
 {
   "schemaVersion": 1,
   "id": "io.github.neuromante.flea-dropbox",
-  "name": "Dropbox – sincronizzazione selettiva",
-  "version": "0.2.1",
+  "name": "Dropbox Selective Sync",
+  "version": "0.3.0",
   "author": "lorenzo nizzi grifi gargiolli",
   "license": "MIT",
-  "description": "Escludi cartelle dalla sincronizzazione Dropbox, gestisci le esclusioni, copia i link condivisi e apri su dropbox.com.",
+  "description": "Choose which Dropbox folders sync to this computer, copy Dropbox links and open items on dropbox.com.",
   "kinds": ["menu-action"],
   "menuActions": [
     {
       "id": "exclude",
-      "label": "Escludi dalla sincronizzazione",
+      "label": "Exclude from Sync",
       "glyph": "eye-off",
       "menus": ["file"],
       "when": {"minItems": 1, "maxItems": 512, "folders": true}
     },
     {
       "id": "manage",
-      "label": "Sincronizzazione selettiva Dropbox…",
+      "label": "Dropbox Selective Sync…",
       "glyph": "cloud-upload",
       "menus": ["file", "background"],
       "when": {"minItems": 0, "maxItems": 1, "folders": true}
     },
     {
       "id": "sharelink",
-      "label": "Copia link Dropbox",
+      "label": "Copy Dropbox Link",
       "glyph": "copy",
       "menus": ["file"],
       "when": {"minItems": 1, "maxItems": 10, "folders": true}
     },
     {
       "id": "view",
-      "label": "Visualizza su dropbox.com",
+      "label": "View on dropbox.com",
       "glyph": "globe",
       "menus": ["file", "background"],
       "when": {"minItems": 0, "maxItems": 1, "folders": true}

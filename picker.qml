@@ -4,7 +4,9 @@ import QtQuick.Window
 // Selective-sync dialog for the Dropbox provider: a flat, indented tree that
 // wears the current Omarchy palette. All input arrives as one JSON argument
 // after "--": {root, target, nodes:[{rel,name,depth,synced,hasChildren}],
-// truncated, colors, font}; nodes come depth-first.
+// truncated, colors, font, strings}; nodes come depth-first. Every visible
+// text comes from "strings" (keys dlg_*, already in the chosen language);
+// the English defaults below are used for any key that is missing.
 // Result protocol (console.log, read from stderr): "DBXEXCL <rel>" for each
 // synced folder now unchecked by itself, "DBXINCL <rel>" for each excluded
 // folder now checked, then "DBXDONE" on confirm. Closing prints nothing.
@@ -27,6 +29,20 @@ Window {
         foreground: "#c2cee9", muted: "#606369", accent: "#99aed6",
         selection: "#282d36", selection_foreground: "#101620"
     }, input.colors || {})
+    readonly property var tx: Object.assign({
+        dlg_window_title: "Dropbox – selective sync",
+        dlg_header: "Selective sync",
+        dlg_filter_placeholder: "Find folder…  (/ or just type)",
+        dlg_keys_hint: "↑↓ move   Space tick   ←→ open/close   / search   Esc close",
+        dlg_cancel: "Cancel",
+        dlg_apply: "Apply",
+        dlg_excluded_tag: "excluded",
+        dlg_pending_exclude: "{n} to exclude",
+        dlg_pending_include: "{n} to re-include",
+        dlg_no_changes: "No changes",
+        dlg_truncated: "Partial list: folders too deep or too many",
+        dlg_no_folders: "No folders found"
+    }, input.strings || {})
     readonly property int indentStep: 18
 
     // own[rel]: the folder's own checked state; a folder also needs every
@@ -39,7 +55,7 @@ Window {
     property string filterText: ""
     readonly property bool hasChanges: plan.excl.length + plan.incl.length > 0
 
-    title: "Dropbox – sincronizzazione selettiva"
+    title: tx.dlg_window_title
     width: 720
     height: 560
     visible: true
@@ -83,11 +99,16 @@ Window {
         return { excl: excl, incl: incl, exclTop: top.length }
     }
 
+    // A count text from the dialog strings; "{n}" is the placeholder.
+    function countText(key, n) {
+        return String(tx[key]).replace("{n}", String(n))
+    }
+
     function summaryText() {
         const parts = []
-        if (plan.exclTop > 0) parts.push(plan.exclTop + " da escludere")
-        if (plan.incl.length > 0) parts.push(plan.incl.length + " da reincludere")
-        return parts.length > 0 ? parts.join(", ") : "Nessuna modifica"
+        if (plan.exclTop > 0) parts.push(countText("dlg_pending_exclude", plan.exclTop))
+        if (plan.incl.length > 0) parts.push(countText("dlg_pending_include", plan.incl.length))
+        return parts.length > 0 ? parts.join(", ") : tx.dlg_no_changes
     }
 
     // ---- actions -------------------------------------------------------
@@ -248,7 +269,7 @@ Window {
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: 2
                 Text {
-                    text: "Sincronizzazione selettiva"
+                    text: win.tx.dlg_header
                     color: win.pal.accent
                     font.family: win.input.font
                     font.pixelSize: 17
@@ -304,7 +325,7 @@ Window {
 
                 Text {
                     visible: field.text.length === 0
-                    text: "Cerca cartella…  (/ oppure digita)"
+                    text: win.tx.dlg_filter_placeholder
                     color: win.pal.muted
                     font: field.font
                 }
@@ -330,7 +351,7 @@ Window {
             Text {
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
-                text: "↑↓ naviga   Spazio spunta   ←→ apri/chiudi   / cerca   Esc chiudi"
+                text: win.tx.dlg_keys_hint
                 color: win.pal.muted
                 font.family: win.input.font
                 font.pixelSize: 12
@@ -348,7 +369,7 @@ Window {
                     Text {
                         id: cancelLabel
                         anchors.centerIn: parent
-                        text: "Annulla"
+                        text: win.tx.dlg_cancel
                         color: win.pal.foreground
                         font.family: win.input.font
                         font.pixelSize: 13
@@ -363,7 +384,7 @@ Window {
                     Text {
                         id: applyLabel
                         anchors.centerIn: parent
-                        text: "Applica"
+                        text: win.tx.dlg_apply
                         color: win.hasChanges ? win.pal.selection_foreground : win.pal.muted
                         font.family: win.input.font
                         font.pixelSize: 13
@@ -398,7 +419,7 @@ Window {
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
                 visible: win.input.truncated === true
-                text: "Elenco parziale: cartelle troppo profonde o numerose"
+                text: win.tx.dlg_truncated
                 color: win.pal.muted
                 font.family: win.input.font
                 font.pixelSize: 12
@@ -518,7 +539,7 @@ Window {
                         anchors.leftMargin: 10
                         anchors.verticalCenter: parent.verticalCenter
                         visible: row.modelData.synced === false
-                        text: "esclusa"
+                        text: win.tx.dlg_excluded_tag
                         color: win.pal.muted
                         font.family: win.input.font
                         font.pixelSize: 12
@@ -528,7 +549,7 @@ Window {
                 Text {
                     anchors.centerIn: parent
                     visible: win.rows.length === 0
-                    text: "Nessuna cartella trovata"
+                    text: win.tx.dlg_no_folders
                     color: win.pal.muted
                     font.family: win.input.font
                     font.pixelSize: 13
