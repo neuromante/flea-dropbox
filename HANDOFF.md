@@ -69,3 +69,7 @@ as menu actions (`menu-action`). The original Strata provider was not modified.
 
 - Issue https://github.com/thisisgm/flea/issues/383 (2026-11-04): a path condition in the `when` of menu-actions, or a
   dynamic answer from the plugin when the menu opens. If accepted, hide the entries outside Dropbox.
+- Issue https://github.com/thisisgm/flea/issues/376 (idle NVIDIA dGPU woken by Flea): fixed upstream in Flea v0.4.1
+  (commit f7eee9e3f, co-authored). Verified on 2026-11-09 with Flea 0.4.1: without any wrapper Flea disables
+  `nvidia_icd.json` by itself, renders on the Intel GPU and the NVIDIA card stays `suspended`. The local workaround
+  (`~/.local/bin/flea-igpu` and the `.desktop` / portal D-Bus overrides that used it) was removed the same day.
