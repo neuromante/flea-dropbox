@@ -2,6 +2,15 @@
 
 ## Status
 
+**0.4.0 (2026-11-21), pushed, not yet verified live, no tag/release yet:** partial selective sync
+(excluded folders expandable from the remote tree in `~/.dropbox/instance*/sync/nucleus.sqlite3`,
+three-state checkbox, loose-files warning, apply with retries and rollback). 85 tests pass; apply
+functions verified on a test folder, dialog checked headless. The approved mockup is kept locally
+only (`docs/mockup/`, excluded from Git because it shows real folder names). Pending: live check in
+Flea, then tag v0.4.0 + GitHub release. Limits: tree depth 4; shared folders from other namespaces
+stay non-expandable; the nucleus format is undocumented (fallback to the local tree if it changes).
+
+
 Version 0.3.0 (2026-11-04). Repository in English; runtime texts follow Flea's language (Italian or English).
 0.3.0 was verified live by the user on 2026-11-04: English menu labels, Italian runtime texts and selective-sync window. Only open item: Flea issue #383.
 

@@ -11,13 +11,17 @@ with "it", English otherwise. Requests before hello use English. Every
 user-visible text lives in STRINGS, keyed by language.
 
 Test overrides (environment):
+  FLEA_DROPBOX_NUCLEUS  Dropbox nucleus.sqlite3 (default newest ~/.dropbox/instance*/sync/nucleus.sqlite3)
   FLEA_DROPBOX_CLI      dropbox-cli binary (default /usr/bin/dropbox-cli)
   FLEA_DROPBOX_INFO     Dropbox info.json (default ~/.dropbox/info.json)
   FLEA_DROPBOX_NO_SPAWN=1  do not launch GUI/browser/clipboard children
 """
 import collections
+import glob
 import json
 import os
+import shutil
+import sqlite3
 import stat
 import subprocess
 import sys
@@ -30,7 +34,10 @@ PROTOCOL_VERSION = 1
 MAX_MESSAGE = 300
 SHARELINK_BUDGET = 25.0  # seconds for one sharelink request (Flea limit is 30 s)
 TREE_MAX_DEPTH = 4       # listed folder levels below the Dropbox root
-TREE_MAX_NODES = 3000    # walked folders listed in the dialog
+TREE_MAX_NODES = 20000   # folders listed in the dialog (local walk plus remote subtrees)
+LOOSE_SAMPLE = 4        # file names per folder shown in the partial-sync warning
+APPLY_BUDGET = 60.0     # seconds to keep retrying `exclude add` after a re-include
+APPLY_RETRY_DELAY = 0.75
 DROPBOX_HOME = "https://www.dropbox.com/home"
 
 DBX_CLI = os.environ.get("FLEA_DROPBOX_CLI") or "/usr/bin/dropbox-cli"
@@ -53,6 +60,7 @@ THEME_COLORS = os.path.join(os.path.expanduser("~"), ".local", "state", "omarchy
 DEVNULL = subprocess.DEVNULL
 QML_EXCL = "qml: DBXEXCL "
 QML_INCL = "qml: DBXINCL "
+QML_PART = "qml: DBXPART "
 
 # Every user-visible text, per language. Keys starting with "dlg_" are sent to
 # the dialog (picker.qml) in the payload's "strings" field. "{name}" marks a
@@ -88,6 +96,9 @@ STRINGS = {
         "excluded_many": "{n} folders excluded",
         "included_one": "{n} folder re-included",
         "included_many": "{n} folders re-included",
+        "partial_one": "{n} folder partly synced",
+        "partial_many": "{n} folders partly synced",
+        "partial_incomplete": "Could not exclude in time: {paths}. The previous exclusions were restored; try again from the window.",
         "invalid_request": "Invalid request.",
         "unsupported_op": "Unsupported operation: {op}",
         "internal_error": "Internal error: {detail}",
@@ -100,10 +111,21 @@ STRINGS = {
         "dlg_apply": "Apply",
         "dlg_excluded_tag": "excluded",
         "dlg_pending_exclude": "{n} to exclude",
-        "dlg_pending_include": "{n} to re-include",
+        "dlg_pending_include": "{n} to include",
+        "dlg_pending_partial_one": "{names} becomes partial",
+        "dlg_pending_partial_many": "{names} become partial",
+        "dlg_partial_tag": "partial",
         "dlg_no_changes": "No changes",
         "dlg_truncated": "Partial list: folders too deep or too many",
         "dlg_no_folders": "No folders found",
+        "dlg_decimal_sep": ".",
+        "dlg_warn_title_one": "{n} file will also be downloaded",
+        "dlg_warn_title_many": "{n} files will also be downloaded",
+        "dlg_warn_text": "Dropbox excludes only folders. The files directly in {folders} will be synced to this computer.",
+        "dlg_warn_more": "… and {k} more · total {size}",
+        "dlg_warn_hint": "To avoid downloading them, move them into a subfolder and try again.",
+        "dlg_warn_back": "Back",
+        "dlg_warn_apply": "Apply anyway",
     },
     "it": {
         "dropbox_not_found": "Cartella Dropbox non trovata (info.json mancante o non valido).",
@@ -134,6 +156,9 @@ STRINGS = {
         "excluded_many": "{n} escluse",
         "included_one": "{n} reinclusa",
         "included_many": "{n} reincluse",
+        "partial_one": "{n} parzialmente sincronizzata",
+        "partial_many": "{n} parzialmente sincronizzate",
+        "partial_incomplete": "Impossibile escludere in tempo: {paths}. Le esclusioni precedenti sono state ripristinate; riprova dalla finestra.",
         "invalid_request": "Richiesta non valida.",
         "unsupported_op": "Operazione non supportata: {op}",
         "internal_error": "Errore interno: {detail}",
@@ -145,10 +170,21 @@ STRINGS = {
         "dlg_apply": "Applica",
         "dlg_excluded_tag": "esclusa",
         "dlg_pending_exclude": "{n} da escludere",
-        "dlg_pending_include": "{n} da reincludere",
+        "dlg_pending_include": "{n} da includere",
+        "dlg_pending_partial_one": "{names} diventa parziale",
+        "dlg_pending_partial_many": "{names} diventano parziali",
+        "dlg_partial_tag": "parziale",
         "dlg_no_changes": "Nessuna modifica",
         "dlg_truncated": "Elenco parziale: cartelle troppo profonde o numerose",
         "dlg_no_folders": "Nessuna cartella trovata",
+        "dlg_decimal_sep": ",",
+        "dlg_warn_title_one": "Verrà scaricato anche {n} file",
+        "dlg_warn_title_many": "Verranno scaricati anche {n} file",
+        "dlg_warn_text": "Dropbox esclude solo cartelle. I file che stanno direttamente in {folders} saranno sincronizzati su questo computer.",
+        "dlg_warn_more": "… e altri {k} · totale {size}",
+        "dlg_warn_hint": "Per non scaricarli, spostali in una sottocartella e riprova.",
+        "dlg_warn_back": "Indietro",
+        "dlg_warn_apply": "Applica comunque",
     },
 }
 
@@ -453,48 +489,279 @@ def ui_font():
     return "monospace"
 
 
-def build_tree(root, excluded, max_depth=TREE_MAX_DEPTH, max_nodes=TREE_MAX_NODES):
+# ---- Dropbox's local copy of the remote tree --------------------------------
+
+def pb_fields(buf):
+    """Decode one protobuf message into [(field, wire type, value)]; ValueError if malformed.
+
+    Wire types 0 (varint -> int), 1 and 5 (fixed -> bytes) and 2 (length-delimited -> bytes).
+    """
+    out = []
+    i = 0
+    n = len(buf)
+
+    def varint(pos):
+        result = shift = 0
+        while True:
+            if pos >= n or shift > 63:
+                raise ValueError("bad varint")
+            byte = buf[pos]
+            pos += 1
+            result |= (byte & 0x7F) << shift
+            shift += 7
+            if byte < 0x80:
+                return result, pos
+
+    while i < n:
+        key, i = varint(i)
+        field, wire = key >> 3, key & 7
+        if field == 0:
+            raise ValueError("bad field number")
+        if wire == 0:
+            value, i = varint(i)
+        elif wire == 2:
+            length, i = varint(i)
+            if i + length > n:
+                raise ValueError("truncated field")
+            value = bytes(buf[i:i + length])
+            i += length
+        elif wire in (1, 5):
+            size = 8 if wire == 1 else 4
+            if i + size > n:
+                raise ValueError("truncated field")
+            value = bytes(buf[i:i + size])
+            i += size
+        else:
+            raise ValueError("unsupported wire type")
+        out.append((field, wire, value))
+    return out
+
+
+ROOT_ID = b"\xff" * 16
+
+
+def parse_remote_record(value):
+    """One `remote_tree` value -> (id, parent id, name, is_dir, size), or None to skip it.
+
+    Layout (observed, not documented): field 1 = node message with 1 = id (16 bytes),
+    2 = parent id (16 bytes; the root's parent is 16 x 0xff), 3 = name (utf-8),
+    6 present = directory, 5 present = file (5: repeated 1 = block {1: hash, 2: size},
+    the file size is the sum of the block sizes). Records without a name (mount points
+    of other namespaces) and anything unexpected are skipped.
+    """
+    try:
+        outer = {}
+        for field, wire, val in pb_fields(bytes(value)):
+            if wire == 2:
+                outer.setdefault(field, val)
+        if 1 not in outer:
+            return None
+        inner = {}
+        for field, wire, val in pb_fields(outer[1]):
+            inner.setdefault(field, (wire, val))
+        if 3 not in inner or 1 not in inner or 2 not in inner:
+            return None
+        node_id, parent = inner[1][1], inner[2][1]
+        if inner[3][0] != 2 or len(node_id) != 16 or len(parent) != 16:
+            return None
+        name = inner[3][1].decode("utf-8")
+        if not name or "/" in name:
+            return None
+        if 6 in inner:
+            return node_id, parent, name, True, 0
+        if 5 in inner:
+            size = 0
+            for field, wire, block in pb_fields(inner[5][1]):
+                if field == 1 and wire == 2:
+                    for bfield, bwire, bval in pb_fields(block):
+                        if bfield == 2 and bwire == 0:
+                            size += bval
+            return node_id, parent, name, False, size
+    except (ValueError, UnicodeDecodeError, TypeError):
+        pass
+    return None
+
+
+class RemoteTree:
+    """Folders and files of Dropbox's synced namespace, indexed by parent id.
+
+    Names compare case-insensitively (Dropbox is case-insensitive).
+    """
+
+    def __init__(self):
+        self._dirs = {}   # parent id -> {casefolded name: (name, id)}
+        self._files = {}  # parent id -> [(name, size)]
+
+    @classmethod
+    def from_rows(cls, rows):
+        tree = cls()
+        for _key, value in rows:
+            rec = parse_remote_record(value)
+            if rec is None:
+                continue
+            node_id, parent, name, is_dir, size = rec
+            if is_dir:
+                tree._dirs.setdefault(parent, {})[name.casefold()] = (name, node_id)
+            else:
+                tree._files.setdefault(parent, []).append((name, size))
+        return tree
+
+    def subdirs(self, rid):
+        """[(name, id)] of the folders directly inside folder `rid`, sorted by name."""
+        found = self._dirs.get(rid, {})
+        return sorted(found.values(), key=lambda e: (e[0].casefold(), e[0]))
+
+    def child(self, rid, name):
+        entry = self._dirs.get(rid, {}).get(name.casefold())
+        return entry[1] if entry else None
+
+    def files(self, rid):
+        """[(name, size)] of the files directly inside folder `rid`, sorted by name."""
+        return sorted(self._files.get(rid, []), key=lambda e: (e[0].casefold(), e[0]))
+
+    def find(self, rel):
+        """Id of the folder at `rel` ("" = the root), or None."""
+        rid = ROOT_ID
+        for part in [p for p in rel.split("/") if p]:
+            rid = self.child(rid, part)
+            if rid is None:
+                return None
+        return rid
+
+
+def find_nucleus():
+    """Newest nucleus.sqlite3 of the running Dropbox instances, or None."""
+    pattern = os.environ.get("FLEA_DROPBOX_NUCLEUS") or os.path.join(
+        os.path.expanduser("~"), ".dropbox", "instance*", "sync", "nucleus.sqlite3")
+    best, best_time = None, -1.0
+    for path in glob.glob(pattern):
+        try:
+            stamp = max(os.stat(path + suffix).st_mtime
+                        for suffix in ("", "-wal") if os.path.exists(path + suffix))
+        except (OSError, ValueError):
+            continue
+        if os.path.isfile(path) and stamp > best_time:
+            best, best_time = path, stamp
+    return best
+
+
+def load_remote_tree(db_path=None):
+    """RemoteTree read from Dropbox's database, or None on any failure.
+
+    The live database (SQLite, WAL mode, written by Dropbox) is never opened: the
+    db, -wal and -shm files are copied into a private temporary directory, the copy
+    is read, and the directory is removed.
+    """
+    tmp = None
+    conn = None
+    try:
+        db_path = db_path or find_nucleus()
+        if not db_path:
+            return None
+        tmp = tempfile.mkdtemp(prefix="flea-dropbox-nucleus-",
+                               dir=os.environ.get("XDG_RUNTIME_DIR") or None)
+        copy = os.path.join(tmp, "nucleus.sqlite3")
+        shutil.copyfile(db_path, copy)
+        for suffix in ("-wal", "-shm"):
+            if os.path.exists(db_path + suffix):
+                shutil.copyfile(db_path + suffix, copy + suffix)
+        conn = sqlite3.connect(copy)
+        return RemoteTree.from_rows(conn.execute("SELECT key, value FROM remote_tree"))
+    except (OSError, sqlite3.Error, ValueError, MemoryError):
+        return None
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except sqlite3.Error:
+                pass
+        if tmp is not None:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+def loose_info(remote, rid, sample=LOOSE_SAMPLE):
+    """Files directly inside remote folder `rid`: {count, bytes, files:[{name,size}]} or None."""
+    if remote is None or rid is None:
+        return None
+    files = remote.files(rid)
+    if not files:
+        return None
+    return {"count": len(files), "bytes": sum(size for _n, size in files),
+            "files": [{"name": n, "size": size} for n, size in files[:sample]]}
+
+
+# ---- Tree for the dialog -------------------------------------------------------
+
+def build_tree(root, excluded, max_depth=TREE_MAX_DEPTH, max_nodes=TREE_MAX_NODES, remote=None):
     """Folder tree for the dialog: {"nodes": [...], "truncated": bool}.
 
     Walks local directories under `root` (no symlink following, hidden names
     skipped) down to `max_depth` levels, listing at most `max_nodes` of them.
-    Every excluded path under root is also a node (synced=False, no children):
-    if its parent is not listed it goes under the deepest listed ancestor.
-    Nodes come depth-first, siblings sorted case-insensitively.
+    Excluded folders do not exist locally: when `remote` (a RemoteTree) knows them,
+    their subfolders come from it (synced=False, expandable, so a subfolder can be
+    chosen); every excluded path under root is a node (synced=False) in any case,
+    placed under the deepest listed ancestor when its own parent is not listed.
+    Nodes come depth-first, siblings sorted case-insensitively, each with its
+    "parent" rel (None at the top). Excluded nodes whose remote folder directly
+    holds files also carry "loose" (see loose_info).
     """
     root = os.path.normpath(root)
-    excl = set()
+    excl = {}
     for path in excluded:
         if isinstance(path, str) and path.startswith("/") and path != root \
                 and is_under_root(os.path.normpath(path), root):
-            excl.add(rel_of(os.path.normpath(path), root))
+            rel = rel_of(os.path.normpath(path), root)
+            excl[rel.casefold()] = rel
+    excl_children = {}
+    for rel in excl.values():
+        excl_children.setdefault(rel.rpartition("/")[0], []).append(rel)
     nodes = {}
     state = {"count": 0, "truncated": False}
 
     # Breadth-first, so a node cap drops the deepest levels, never later top-level folders.
-    queue = collections.deque([(root, "", 0)])
+    queue = collections.deque([(root, "", 0, ROOT_ID if remote else None)])
     while queue and not state["truncated"]:
-        abs_dir, rel_dir, depth = queue.popleft()
-        try:
-            with os.scandir(abs_dir) as it:
-                entries = [e for e in it
-                           if not e.name.startswith(".") and e.is_dir(follow_symlinks=False)]
-        except OSError:
-            continue
-        entries.sort(key=lambda e: (e.name.casefold(), e.name))
-        for entry in entries:
-            if state["count"] >= max_nodes:
+        abs_dir, rel_dir, depth, rid = queue.popleft()
+        entries = {}  # casefolded name -> (name, absolute path or None, forced into the list)
+        if abs_dir is not None:
+            try:
+                with os.scandir(abs_dir) as it:
+                    for e in it:
+                        if not e.name.startswith(".") and e.is_dir(follow_symlinks=False):
+                            entries[e.name.casefold()] = (e.name, e.path, False)
+            except OSError:
+                continue
+            for rel in excl_children.get(rel_dir, []):
+                name = rel.rpartition("/")[2]
+                entries.setdefault(name.casefold(), (name, None, True))
+        elif remote is not None and rid is not None:
+            for name, _id in remote.subdirs(rid):
+                if not name.startswith("."):
+                    entries[name.casefold()] = (name, None, False)
+        for _fold, (name, path, forced) in sorted(entries.items(),
+                                                  key=lambda kv: (kv[0], kv[1][0])):
+            if state["count"] >= max_nodes and not forced:
                 state["truncated"] = True
                 break
             state["count"] += 1
-            rel = rel_dir + "/" + entry.name if rel_dir else entry.name
-            is_excl = rel in excl
-            nodes[rel] = {"rel": rel, "name": entry.name, "depth": depth,
-                          "synced": not is_excl, "parent": rel_dir or None}
-            if not is_excl and depth + 1 < max_depth:
-                queue.append((entry.path, rel, depth + 1))
+            rel = rel_dir + "/" + name if rel_dir else name
+            is_excl = rel.casefold() in excl
+            child_rid = remote.child(rid, name) if remote is not None and rid is not None else None
+            nodes[rel] = {"rel": rel, "name": name, "depth": depth,
+                          "synced": abs_dir is not None and not is_excl,
+                          "parent": rel_dir or None}
+            if not nodes[rel]["synced"]:
+                loose = loose_info(remote, child_rid)
+                if loose:
+                    nodes[rel]["loose"] = loose
+            if depth + 1 < max_depth:
+                if not nodes[rel]["synced"]:
+                    if child_rid is not None:
+                        queue.append((None, rel, depth + 1, child_rid))
+                else:
+                    queue.append((path, rel, depth + 1, child_rid))
 
-    for rel in sorted(excl, key=lambda r: (r.count("/"), r)):
+    for rel in sorted(excl.values(), key=lambda r: (r.count("/"), r)):
         if rel in nodes:
             continue
         parts = rel.split("/")
@@ -517,27 +784,67 @@ def build_tree(root, excluded, max_depth=TREE_MAX_DEPTH, max_nodes=TREE_MAX_NODE
 
     def visit(parent):
         for node in children.get(parent, []):
-            ordered.append({"rel": node["rel"], "name": node["name"], "depth": node["depth"],
-                            "synced": node["synced"], "hasChildren": node["rel"] in children})
+            item = {"rel": node["rel"], "name": node["name"], "depth": node["depth"],
+                    "synced": node["synced"], "parent": node["parent"],
+                    "hasChildren": node["rel"] in children}
+            if "loose" in node:
+                item["loose"] = node["loose"]
+            ordered.append(item)
             visit(node["rel"])
 
     visit(None)
     return {"nodes": ordered, "truncated": state["truncated"]}
 
 
-def plan_changes(nodes, excluded, excl_rels, incl_rels):
-    """Validated changes from the dialog answer: (to_add, to_remove) lists of rels.
+def plan_exclusions(nodes, excluded_rels, excl_rels, incl_rels, partial_rels=(),
+                    extra_children=None):
+    """Desired exclusions after the dialog: (to_add, to_remove), lists of rels.
 
-    to_add: rels that are synced now and were unchecked; only top-most kept.
-    to_remove: rels that were excluded and are checked again. Unknown rels are ignored.
+    The dialog reports the nodes whose effective state changed: `excl_rels` were
+    synced and are now off, `incl_rels` were excluded (or under an excluded folder)
+    and are now on; a node is on only if every ancestor is on. Rels that do not fit
+    (unknown, wrong previous state) are ignored. The result is the minimal set of
+    exclusions: the top-most off folders whose parent is on. `partial_rels` are the
+    folders that turn on as "partial" (some subfolders stay excluded): their remote
+    subfolders that were not listed in the dialog (node cap) stay excluded too, via
+    `extra_children(rel)` (names of their remote subfolders; optional).
+    `excluded_rels` is the current
+    `exclude list`; entries that are not nodes are left alone.
     """
-    synced = {n["rel"]: n.get("synced") is True for n in nodes}
-    excluded = set(excluded)
-    add = sorted({r for r in excl_rels if isinstance(r, str) and synced.get(r) is True})
-    add = [r for r in add if not any(r.startswith(a + "/") for a in add)]
-    remove = sorted({r for r in incl_rels
-                     if isinstance(r, str) and r in synced and r in excluded})
-    return add, remove
+    initial = {n["rel"]: n.get("synced") is True for n in nodes}
+    parent = {n["rel"]: n.get("parent") for n in nodes}
+    final = dict(initial)
+    for rel in excl_rels:
+        if isinstance(rel, str) and initial.get(rel) is True:
+            final[rel] = False
+    for rel in incl_rels:
+        if isinstance(rel, str) and initial.get(rel) is False:
+            final[rel] = True
+    for n in nodes:  # depth-first: parents come first
+        p = parent[n["rel"]]
+        if p is not None and not final[p]:
+            final[n["rel"]] = False
+    wanted = {r for r, on in final.items()
+              if not on and (parent[r] is None or final[parent[r]])}
+    kids = {}
+    for rel, p in parent.items():
+        kids.setdefault(p, []).append(rel)
+    if extra_children is not None:
+        for rel in partial_rels:
+            if isinstance(rel, str) and final.get(rel) and not initial[rel]:
+                listed = {c.rpartition("/")[2].casefold() for c in kids.get(rel, [])}
+                for name in extra_children(rel):
+                    if name.casefold() not in listed:
+                        wanted.add(rel + "/" + name)
+    current = {r for r in excluded_rels if isinstance(r, str)}
+    kept = {r for r in current if r not in initial}
+    desired = wanted | kept
+    fold = {r.casefold() for r in current}
+    desired_fold = {r.casefold() for r in desired}
+    to_add = sorted((r for r in desired if r.casefold() not in fold), key=lambda r: (r.count("/"), r))
+    to_remove = sorted((r for r in current if r.casefold() not in desired_fold),
+                       key=lambda r: (r.count("/"), r))
+    return to_add, to_remove
 
 
 def manage_dialog(target, lang="en"):
@@ -552,7 +859,9 @@ def manage_dialog(target, lang="en"):
     target = os.path.normpath(target)
     if not is_under_root(target, root):
         target = root
-    tree = build_tree(root, excluded_dirs())
+    excluded = excluded_dirs()
+    remote = load_remote_tree()  # None: today's behaviour, local folders only
+    tree = build_tree(root, excluded, remote=remote)
     target_rel = rel_of(target, root)
     listed = {n["rel"] for n in tree["nodes"]}
     while target_rel and target_rel not in listed:
@@ -578,45 +887,103 @@ def manage_dialog(target, lang="en"):
     lines = proc.stderr.decode("utf-8", errors="replace").splitlines()
     if "qml: DBXDONE" not in lines:
         return 0  # closed without confirming
-    excluded = {n["rel"] for n in tree["nodes"] if not n["synced"]}
     excl_rels = [ln[len(QML_EXCL):] for ln in lines if ln.startswith(QML_EXCL)]
     incl_rels = [ln[len(QML_INCL):] for ln in lines if ln.startswith(QML_INCL)]
-    to_add, to_remove = plan_changes(tree["nodes"], excluded, excl_rels, incl_rels)
+    part_rels = [ln[len(QML_PART):] for ln in lines if ln.startswith(QML_PART)]
+    excluded_rels = [rel_of(os.path.normpath(p), root) for p in excluded
+                     if p != root and is_under_root(os.path.normpath(p), root)]
+
+    def extra_children(rel):
+        rid = remote.find(rel) if remote is not None else None
+        return [name for name, _id in remote.subdirs(rid)] if rid is not None else []
+
+    to_add, to_remove = plan_exclusions(tree["nodes"], excluded_rels, excl_rels, incl_rels,
+                                        part_rels, extra_children)
     return apply_changes(root, to_add, to_remove)
 
 
-def apply_changes(root, to_add, to_remove):
-    """Apply the dialog answer with dropbox-cli, then notify a summary."""
+def excluded_dirs_checked():
+    """Like excluded_dirs() but None when the list cannot be read."""
+    try:
+        rc, out, _err = run_cli([DBX_CLI, "exclude", "list"], timeout=10, cwd="/")
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if rc != 0:
+        return None
+    return ["/" + ln for ln in out.splitlines()[1:] if ln.strip()]
+
+
+def describe_changes(to_add, to_remove):
+    """Notification text: re-included, partly synced (re-included with exclusions below
+    it) and excluded folders, counted as the user sees them."""
+    def under(rel, folder):
+        return rel.casefold().startswith(folder.casefold() + "/")
+
+    partial = [r for r in to_remove if any(under(a, r) for a in to_add)]
+    full = len(to_remove) - len(partial)
+    excluded = len([a for a in to_add if not any(under(a, r) for r in to_remove)])
+    parts = []
+    if excluded:
+        parts.append(tr("excluded_one" if excluded == 1 else "excluded_many", n=excluded))
+    if full:
+        parts.append(tr("included_one" if full == 1 else "included_many", n=full))
+    if partial:
+        parts.append(tr("partial_one" if len(partial) == 1 else "partial_many", n=len(partial)))
+    return ", ".join(parts)
+
+
+def apply_changes(root, to_add, to_remove, sleep=time.sleep, clock=time.monotonic,
+                  budget=APPLY_BUDGET, delay=APPLY_RETRY_DELAY):
+    """Apply a plan with dropbox-cli, then notify a summary.
+
+    Removals go first, in one call. `exclude add` does nothing (silently) for a path
+    whose parent is still excluded, and a re-included folder shows its subfolders
+    locally only after about a second; so each add is retried, checked against
+    `exclude list`, until it appears there or `budget` seconds pass. Never creates
+    local folders (that would produce selective-sync conflict copies).
+    """
     if not to_add and not to_remove:
         notify("Dropbox", tr("no_sync_changes"))
         return 0
-
-    steps = []
-    if to_remove:
-        steps.append(("remove", to_remove))
-    if to_add:
-        steps.append(("add", to_add))
     try:
-        for verb, rels in steps:
-            paths = [os.path.join(root, r) for r in rels]
-            rc, _out, err = run_cli([DBX_CLI, "exclude", verb] + paths, timeout=120, cwd="/")
+        if to_remove:
+            paths = [os.path.join(root, r) for r in to_remove]
+            rc, _out, err = run_cli([DBX_CLI, "exclude", "remove"] + paths, timeout=120, cwd="/")
             if rc != 0:
                 detail = (err or "").strip()
                 notify("Dropbox", tr("operation_failed") + (": " + detail if detail else "."))
                 return rc or 1
+        pending = list(to_add)
+        deadline = clock() + budget
+        while pending:
+            paths = [os.path.join(root, r) for r in pending]
+            rc, _out, err = run_cli([DBX_CLI, "exclude", "add"] + paths, timeout=60, cwd="/")
+            if rc != 0:
+                detail = (err or "").strip()
+                notify("Dropbox", tr("operation_failed") + (": " + detail if detail else "."))
+                return rc or 1
+            current = excluded_dirs_checked()
+            if current is None:
+                break  # cannot verify: trust the exit status
+            have = {c.casefold() for c in current}
+            pending = [r for r in pending if os.path.join(root, r).casefold() not in have]
+            if pending:
+                if clock() >= deadline:
+                    # Roll back: re-exclude what was re-included, so a parent whose
+                    # subfolders could not be excluded is not downloaded in full.
+                    if to_remove:
+                        run_cli([DBX_CLI, "exclude", "add"]
+                                + [os.path.join(root, r) for r in to_remove], timeout=60, cwd="/")
+                    notify("Dropbox", tr("partial_incomplete", paths=", ".join(pending)))
+                    return 1
+                sleep(delay)
     except subprocess.TimeoutExpired:
         notify("Dropbox", tr("operation_timeout"))
         return 1
     except OSError as exc:
         notify("Dropbox", tr("operation_failed") + ": " + str(exc))
         return 1
-    parts = []
-    if to_add:
-        parts.append(tr("excluded_one" if len(to_add) == 1 else "excluded_many", n=len(to_add)))
-    if to_remove:
-        parts.append(tr("included_one" if len(to_remove) == 1 else "included_many",
-                        n=len(to_remove)))
-    notify("Dropbox", tr("sync_updated", changes=", ".join(parts)))
+    notify("Dropbox", tr("sync_updated", changes=describe_changes(to_add, to_remove)))
     return 0
 
 

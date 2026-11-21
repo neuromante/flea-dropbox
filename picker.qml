@@ -1,15 +1,24 @@
 import QtQuick
 import QtQuick.Window
+import "tree_logic.js" as Logic
 
 // Selective-sync dialog for the Dropbox provider: a flat, indented tree that
 // wears the current Omarchy palette. All input arrives as one JSON argument
-// after "--": {root, target, nodes:[{rel,name,depth,synced,hasChildren}],
-// truncated, colors, font, strings}; nodes come depth-first. Every visible
-// text comes from "strings" (keys dlg_*, already in the chosen language);
-// the English defaults below are used for any key that is missing.
-// Result protocol (console.log, read from stderr): "DBXEXCL <rel>" for each
-// synced folder now unchecked by itself, "DBXINCL <rel>" for each excluded
-// folder now checked, then "DBXDONE" on confirm. Closing prints nothing.
+// after "--": {root, target, nodes:[{rel,name,depth,synced,parent,hasChildren,
+// loose?:{count,bytes,files:[{name,size}]}}], truncated, colors, font, strings};
+// nodes come depth-first. Excluded folders are listed too (synced=false) with
+// the subfolders Dropbox knows remotely; "loose" = files directly in such a
+// folder. Every visible text comes from "strings" (keys dlg_*, already in the
+// chosen language); the English defaults below are used for any key that is
+// missing. The tick rules live in tree_logic.js.
+// Checkbox: checked = fully synced, bar = partial (folder synced, some
+// subfolders excluded), empty = excluded.
+// Result protocol (console.log, read from stderr), on confirm: one
+// "DBXEXCL <rel>" per node that was effectively synced and now is not, one
+// "DBXINCL <rel>" per node that was not and now is (a node is synced only if
+// all its ancestors are), one "DBXPART <rel>" per folder that becomes synced
+// while some subfolders stay excluded (partial), then "DBXDONE". bin/run turns
+// them into the minimal set of exclusions. Closing prints nothing.
 Window {
     id: win
 
@@ -38,21 +47,37 @@ Window {
         dlg_apply: "Apply",
         dlg_excluded_tag: "excluded",
         dlg_pending_exclude: "{n} to exclude",
-        dlg_pending_include: "{n} to re-include",
+        dlg_pending_include: "{n} to include",
+        dlg_pending_partial_one: "{names} becomes partial",
+        dlg_pending_partial_many: "{names} become partial",
+        dlg_partial_tag: "partial",
         dlg_no_changes: "No changes",
         dlg_truncated: "Partial list: folders too deep or too many",
-        dlg_no_folders: "No folders found"
+        dlg_no_folders: "No folders found",
+        dlg_decimal_sep: ".",
+        dlg_warn_title_one: "{n} file will also be downloaded",
+        dlg_warn_title_many: "{n} files will also be downloaded",
+        dlg_warn_text: "Dropbox excludes only folders. The files directly in {folders} will be synced to this computer.",
+        dlg_warn_more: "… and {k} more · total {size}",
+        dlg_warn_hint: "To avoid downloading them, move them into a subfolder and try again.",
+        dlg_warn_back: "Back",
+        dlg_warn_apply: "Apply anyway"
     }, input.strings || {})
     readonly property int indentStep: 18
 
-    // own[rel]: the folder's own checked state; a folder also needs every
-    // ancestor checked to be synced (see effective()).
-    property var own: ({})
+    // own[rel]: the folder's own tick; auto[rel]: opened as partial by a tick
+    // below it. Rules and derived states: see tree_logic.js.
+    readonly property var ix: Logic.buildIndex(input.nodes)
+    property var own: Logic.initialOwn(input.nodes)
+    property var auto: ({})
     property var expanded: ({})
-    property var plan: ({ excl: [], incl: [], exclTop: 0 })
+    property var plan: Logic.plan(ix, input.nodes, own, auto)
+    readonly property var states: plan.state
+    readonly property var states0: Logic.compute(ix, Logic.initialOwn(input.nodes)).state
     property var rows: []
     property bool filtering: false
     property string filterText: ""
+    property bool warning: false
     readonly property bool hasChanges: plan.excl.length + plan.incl.length > 0
 
     title: tx.dlg_window_title
@@ -63,40 +88,12 @@ Window {
 
     // ---- state helpers -------------------------------------------------
 
-    function inheritedOff(rel) {
-        let cut = rel.lastIndexOf("/")
-        let r = rel
-        while (cut > 0) {
-            r = r.substring(0, cut)
-            if (r in own && own[r] !== true) return true
-            cut = r.lastIndexOf("/")
-        }
-        return false
-    }
-
-    function effective(rel) {
-        return own[rel] === true && !inheritedOff(rel)
-    }
-
     function isExpanded(rel) {
         return expanded[rel] === true
     }
 
     function terms() {
         return filterText.toLowerCase().split(/\s+/).filter(t => t.length > 0)
-    }
-
-    function computePlan() {
-        const excl = []
-        const incl = []
-        input.nodes.forEach(n => {
-            if (n.synced) { if (own[n.rel] === false) excl.push(n.rel) }
-            else if (effective(n.rel)) incl.push(n.rel)
-        })
-        excl.sort()
-        incl.sort()
-        const top = excl.filter(r => !excl.some(a => r.indexOf(a + "/") === 0))
-        return { excl: excl, incl: incl, exclTop: top.length }
     }
 
     // A count text from the dialog strings; "{n}" is the placeholder.
@@ -107,18 +104,51 @@ Window {
     function summaryText() {
         const parts = []
         if (plan.exclTop > 0) parts.push(countText("dlg_pending_exclude", plan.exclTop))
-        if (plan.incl.length > 0) parts.push(countText("dlg_pending_include", plan.incl.length))
-        return parts.length > 0 ? parts.join(", ") : tx.dlg_no_changes
+        if (plan.inclTop > 0) parts.push(countText("dlg_pending_include", plan.inclTop))
+        if (plan.partial.length > 0)
+            parts.push(String(tx[plan.partial.length === 1 ? "dlg_pending_partial_one"
+                                                           : "dlg_pending_partial_many"])
+                       .replace("{names}", plan.partial.join(", ")))
+        return parts.length > 0 ? parts.join(" · ") : tx.dlg_no_changes
+    }
+
+    // "1.4 MB" / "1,4 MB" (decimal units, separator from the strings).
+    function sizeText(bytes) {
+        const units = ["B", "kB", "MB", "GB", "TB"]
+        let v = bytes
+        let u = 0
+        while (v >= 1000 && u < units.length - 1) { v /= 1000; ++u }
+        const t = (u === 0 || v >= 10) ? String(Math.round(v)) : v.toFixed(1)
+        return t.replace(".", tx.dlg_decimal_sep) + " " + units[u]
+    }
+
+    function warnTotal() {
+        let n = 0
+        plan.warn.forEach(w => { n += w.count })
+        return n
+    }
+
+    function warnTitle() {
+        const n = warnTotal()
+        return countText(n === 1 ? "dlg_warn_title_one" : "dlg_warn_title_many", n)
+    }
+
+    function warnText() {
+        return String(tx.dlg_warn_text).replace("{folders}", plan.warn.map(w => w.rel).join(", "))
+    }
+
+    function warnMore(w) {
+        return String(tx.dlg_warn_more).replace("{k}", String(w.count - w.files.length))
+                                       .replace("{size}", sizeText(w.bytes))
     }
 
     // ---- actions -------------------------------------------------------
 
     function toggleOwn(rel) {
-        if (inheritedOff(rel)) return
-        const next = Object.assign({}, own)
-        next[rel] = !(own[rel] === true)
-        own = next
-        plan = computePlan()
+        const r = Logic.toggle(ix, own, auto, rel)
+        own = r.own
+        auto = r.auto
+        plan = Logic.plan(ix, input.nodes, own, auto)
     }
 
     function setExpanded(rel, on) {
@@ -224,18 +254,31 @@ Window {
         event.accepted = handled
     }
 
+    // Apply: with loose files that would also be downloaded, ask first.
     function confirm() {
         if (!hasChanges) return
+        if (plan.warn.length > 0) {
+            warning = true
+            sheet.forceActiveFocus()
+            return
+        }
+        finish()
+    }
+
+    function closeWarning() {
+        warning = false
+        list.forceActiveFocus()
+    }
+
+    function finish() {
         plan.excl.forEach(rel => console.log("DBXEXCL " + rel))
         plan.incl.forEach(rel => console.log("DBXINCL " + rel))
+        plan.opened.forEach(rel => console.log("DBXPART " + rel))
         console.log("DBXDONE")
         Qt.quit()
     }
 
     Component.onCompleted: {
-        const o = {}
-        input.nodes.forEach(n => { o[n.rel] = n.synced === true })
-        own = o
         // Ancestors of the target are expanded so the target row is visible.
         const e = {}
         const t = input.target || ""
@@ -245,7 +288,6 @@ Window {
             cut = t.indexOf("/", cut + 1)
         }
         expanded = e
-        plan = computePlan()
         refresh(t.length > 0 ? t : null)
         list.forceActiveFocus()
     }
@@ -456,16 +498,19 @@ Window {
                     required property int index
                     readonly property string rel: modelData.rel
                     readonly property int level: win.filtering ? 0 : modelData.depth
-                    readonly property bool isOff: win.inheritedOff(rel)
-                    readonly property bool isChecked: win.effective(rel)
+                    readonly property string state: win.states[rel] || "off"
+                    readonly property bool isChecked: state === "on"
+                    readonly property bool isPartial: state === "partial"
+                    // Top of an excluded branch: only there the "excluded" tag shows.
+                    readonly property bool isExclTop: modelData.synced === false
+                        && (modelData.parent === null || win.ix.byRel[modelData.parent].synced === true)
                     readonly property bool isOpen: win.isExpanded(rel)
-                    readonly property bool differs: isChecked !== modelData.synced
+                    readonly property bool differs: state !== win.states0[rel]
                     readonly property int boxX: 30 + level * win.indentStep
 
                     width: list.width
                     height: 32
                     color: ListView.isCurrentItem ? win.pal.selection : "transparent"
-                    opacity: isOff ? 0.5 : 1
 
                     MouseArea {
                         anchors.fill: parent
@@ -494,7 +539,7 @@ Window {
                         }
                     }
 
-                    // Checkbox: checked = will be synced.
+                    // Checkbox: check = fully synced, bar = partial, empty = excluded.
                     Rectangle {
                         id: box
                         x: row.boxX
@@ -503,7 +548,14 @@ Window {
                         height: 16
                         color: row.isChecked ? win.pal.accent : "transparent"
                         border.width: 1
-                        border.color: row.isChecked ? win.pal.accent : win.pal.muted
+                        border.color: (row.isChecked || row.isPartial) ? win.pal.accent : win.pal.muted
+                        Rectangle {
+                            anchors.centerIn: parent
+                            visible: row.isPartial
+                            width: 8
+                            height: 2
+                            color: win.pal.accent
+                        }
                         Text {
                             anchors.centerIn: parent
                             visible: row.isChecked
@@ -538,9 +590,9 @@ Window {
                         anchors.left: name.right
                         anchors.leftMargin: 10
                         anchors.verticalCenter: parent.verticalCenter
-                        visible: row.modelData.synced === false
-                        text: win.tx.dlg_excluded_tag
-                        color: win.pal.muted
+                        visible: row.isExclTop || row.isPartial
+                        text: row.isPartial ? win.tx.dlg_partial_tag : win.tx.dlg_excluded_tag
+                        color: row.isPartial ? win.pal.accent : win.pal.muted
                         font.family: win.input.font
                         font.pixelSize: 12
                     }
@@ -553,6 +605,176 @@ Window {
                     color: win.pal.muted
                     font.family: win.input.font
                     font.pixelSize: 13
+                }
+            }
+        }
+    }
+
+    // Warning sheet: loose files directly in folders that become partial
+    // (Dropbox excludes only folders, so these files are downloaded).
+    Rectangle {
+        id: dim
+        anchors.fill: parent
+        visible: win.warning
+        color: "#cc0c1118"
+        MouseArea { anchors.fill: parent }   // swallow clicks behind the sheet
+
+        FocusScope {
+            id: sheet
+            anchors.centerIn: parent
+            width: Math.min(520, parent.width - 40)
+            height: sheetBox.height
+            Keys.onPressed: event => {
+                const k = event.key
+                if (k === Qt.Key_Return || k === Qt.Key_Enter) { win.finish(); event.accepted = true }
+                else if (k === Qt.Key_Escape) { win.closeWarning(); event.accepted = true }
+            }
+
+            Rectangle {
+                id: sheetBox
+                width: parent.width
+                height: sheetCol.implicitHeight + 36
+                color: win.pal.background
+                border.width: 1
+                border.color: win.pal.lighter_background
+
+                Column {
+                    id: sheetCol
+                    x: 18
+                    y: 18
+                    width: parent.width - 36
+                    spacing: 12
+                    Text {
+                        width: parent.width
+                        text: win.warning ? win.warnTitle() : ""
+                        color: "#e0b46a"
+                        font.family: win.input.font
+                        font.pixelSize: 15
+                        font.bold: true
+                        wrapMode: Text.Wrap
+                    }
+                    Text {
+                        width: parent.width
+                        text: win.warning ? win.warnText() : ""
+                        color: win.pal.foreground
+                        font.family: win.input.font
+                        font.pixelSize: 13
+                        wrapMode: Text.Wrap
+                    }
+                    Rectangle {
+                        width: parent.width
+                        height: Math.min(220, filesCol.implicitHeight + 16)
+                        color: win.pal.dark_background
+                        border.width: 1
+                        border.color: win.pal.lighter_background
+                        Flickable {
+                            anchors.fill: parent
+                            anchors.margins: 8
+                            contentHeight: filesCol.implicitHeight
+                            clip: true
+                            boundsBehavior: Flickable.StopAtBounds
+                            Column {
+                                id: filesCol
+                                width: parent.width
+                                spacing: 4
+                                Repeater {
+                                    model: win.warning ? win.plan.warn : []
+                                    delegate: Column {
+                                        required property var modelData
+                                        width: filesCol.width
+                                        spacing: 4
+                                        Text {
+                                            text: modelData.rel + "/"
+                                            color: win.pal.muted
+                                            font.family: win.input.font
+                                            font.pixelSize: 13
+                                        }
+                                        Repeater {
+                                            model: modelData.files
+                                            delegate: Item {
+                                                required property var modelData
+                                                width: filesCol.width
+                                                height: 18
+                                                Text {
+                                                    anchors.left: parent.left
+                                                    anchors.right: sz.left
+                                                    anchors.rightMargin: 10
+                                                    text: parent.modelData.name
+                                                    color: win.pal.foreground
+                                                    font.family: win.input.font
+                                                    font.pixelSize: 13
+                                                    elide: Text.ElideMiddle
+                                                }
+                                                Text {
+                                                    id: sz
+                                                    anchors.right: parent.right
+                                                    text: win.sizeText(parent.modelData.size)
+                                                    color: win.pal.muted
+                                                    font.family: win.input.font
+                                                    font.pixelSize: 13
+                                                }
+                                            }
+                                        }
+                                        Text {
+                                            visible: modelData.count > modelData.files.length
+                                            text: win.warnMore(modelData)
+                                            color: win.pal.muted
+                                            font.family: win.input.font
+                                            font.pixelSize: 13
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Text {
+                        width: parent.width
+                        text: win.tx.dlg_warn_hint
+                        color: win.pal.muted
+                        font.family: win.input.font
+                        font.pixelSize: 13
+                        wrapMode: Text.Wrap
+                    }
+                    Item {
+                        width: parent.width
+                        height: 36
+                        Row {
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 10
+                            Rectangle {
+                                width: backLabel.implicitWidth + 32
+                                height: 34
+                                color: "transparent"
+                                border.width: 1
+                                border.color: win.pal.lighter_background
+                                Text {
+                                    id: backLabel
+                                    anchors.centerIn: parent
+                                    text: win.tx.dlg_warn_back
+                                    color: win.pal.foreground
+                                    font.family: win.input.font
+                                    font.pixelSize: 13
+                                }
+                                MouseArea { anchors.fill: parent; onClicked: win.closeWarning() }
+                            }
+                            Rectangle {
+                                width: anywayLabel.implicitWidth + 32
+                                height: 34
+                                color: win.pal.accent
+                                Text {
+                                    id: anywayLabel
+                                    anchors.centerIn: parent
+                                    text: win.tx.dlg_warn_apply
+                                    color: win.pal.selection_foreground
+                                    font.family: win.input.font
+                                    font.pixelSize: 13
+                                    font.bold: true
+                                }
+                                MouseArea { anchors.fill: parent; onClicked: win.finish() }
+                            }
+                        }
+                    }
                 }
             }
         }

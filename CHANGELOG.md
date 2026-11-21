@@ -2,6 +2,21 @@
 
 All notable changes to flea-dropbox are listed here.
 
+## 0.4.0 – 2026-11-21
+
+### Added
+- Partial selective sync. Excluded folders can be opened in the selective-sync window: their
+  subfolders come from Dropbox's local copy of the remote tree (`nucleus.sqlite3`, read from a
+  temporary copy; without it the window falls back to local folders only).
+- Three-state checkbox: synced, partial (some subfolders excluded) and excluded. Ticking a
+  subfolder of an excluded folder makes the parent partial and keeps its other subfolders excluded.
+- Warning before applying when a folder that becomes partial holds loose files, which Dropbox
+  will download (it excludes folders only).
+
+### Changed
+- Changes are applied as a diff of the exclusion list: removals first, then additions retried
+  for up to 60 seconds until Dropbox accepts them; on timeout the removed exclusions are restored.
+
 ## 0.3.0 – 2026-11-04
 
 ### Changed

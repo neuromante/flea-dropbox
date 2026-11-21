@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.neuromante.flea-dropbox",
   "name": "Dropbox Selective Sync",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "author": "lorenzo nizzi grifi gargiolli",
   "license": "MIT",
   "description": "Choose which Dropbox folders sync to this computer, copy Dropbox links and open items on dropbox.com.",
